@@ -9,7 +9,7 @@ import {
     TextInput,
     View,
 } from "react-native";
-
+import { Link, router } from "expo-router";
 import { useMedications } from "@/hooks/useMedications";
 
 export default function MedicationsScreen() {
@@ -171,6 +171,23 @@ export default function MedicationsScreen() {
                             </View>
 
                             <View style={styles.actionContainer}>
+                                <Pressable
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Manage schedule for ${item.name}`}
+                                    onPress={() =>
+                                        router.push({
+                                            pathname: "/schedule",
+                                            params: {
+                                                medicationId: item.id,
+                                                medicationName: item.name,
+                                            },
+                                        })
+                                    }
+                                    style={styles.editButton}
+                                >
+                                    <Text style={styles.editButtonText}>Schedule</Text>
+                                </Pressable>
+
                                 <Pressable
                                     accessibilityRole="button"
                                     accessibilityLabel={`Edit ${item.name}`}
