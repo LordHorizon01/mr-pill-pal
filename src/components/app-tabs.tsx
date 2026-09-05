@@ -19,6 +19,12 @@ export default function AppTabs() {
           renderingMode="template"
         />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="medications">
+        <NativeTabs.Trigger.Label>
+          Medications
+        </NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
 
       <NativeTabs.Trigger name="explore">
         <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>

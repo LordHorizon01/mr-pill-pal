@@ -1,7 +1,7 @@
 import * as Device from 'expo-device';
 import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { Link } from "expo-router";
 import { AnimatedIcon } from '@/components/animated-icon';
 import { HintRow } from '@/components/hint-row';
 import { ThemedText } from '@/components/themed-text';
@@ -54,7 +54,9 @@ export default function HomeScreen() {
             hint={<ThemedText type="code">npm run reset-project</ThemedText>}
           />
         </ThemedView>
-
+        <Link href="/medications">
+          Open Medications
+        </Link>
         {Platform.OS === 'web' && <WebBadge />}
       </SafeAreaView>
     </ThemedView>
