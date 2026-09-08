@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -77,7 +78,12 @@ export default function ScheduleScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={styles.title}>
         Medication Schedule
       </Text>
@@ -194,7 +200,7 @@ export default function ScheduleScreen() {
           </View>
         ))
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -202,8 +208,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+  },
+
+  contentContainer: {
     paddingHorizontal: 20,
     paddingTop: 24,
+    paddingBottom: 40,
   },
 
   title: {

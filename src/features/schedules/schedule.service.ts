@@ -104,10 +104,37 @@ export async function addSchedule(
     throw new Error("Recurring schedules require at least one repeat day.");
   }
 
+  const normalizedTime = validateTime(input.time);
+
+  const existingSchedules = await getSchedulesByMedicationId(
+    input.medicationId,
+  );
+
+  const duplicateSchedule = existingSchedules.some((schedule) => {
+    const existingDays = schedule.repeatDays ?? [];
+    const newDays = repeatDays ?? [];
+
+    const sameDays =
+      existingDays.length === newDays.length &&
+      existingDays.every((day, index) => day === newDays[index]);
+
+    return (
+      schedule.type === input.type &&
+      schedule.time === normalizedTime &&
+      sameDays &&
+      schedule.startDate === startDate &&
+      schedule.endDate === endDate
+    );
+  });
+
+  if (duplicateSchedule) {
+    throw new Error("This medication already has the same reminder schedule.");
+  }
+
   const schedule = await createSchedule({
     medicationId: input.medicationId,
     type: input.type,
-    time: validateTime(input.time),
+    time: normalizedTime,
     startDate,
     endDate,
     repeatDays: input.type === "recurring" ? repeatDays : undefined,
