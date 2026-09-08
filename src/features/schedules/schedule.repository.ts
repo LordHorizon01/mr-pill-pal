@@ -1,9 +1,6 @@
 import { getDatabase } from "@/database/database";
 
-import {
-  CreateScheduleInput,
-  MedicationSchedule,
-} from "./schedule.types";
+import { CreateScheduleInput, MedicationSchedule } from "./schedule.types";
 
 type ScheduleRow = {
   id: string;
@@ -14,10 +11,33 @@ type ScheduleRow = {
   end_date: string | null;
   repeat_days: string | null;
   notification_id: string | null;
+  notification_ids: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
 };
+
+function parseNotificationIds(
+  notificationIds: string | null,
+  notificationId: string | null,
+): string[] | undefined {
+  if (notificationIds) {
+    try {
+      const parsed = JSON.parse(notificationIds);
+
+      if (
+        Array.isArray(parsed) &&
+        parsed.every((id) => typeof id === "string")
+      ) {
+        return parsed;
+      }
+    } catch {
+      // Fall back to the old single notification ID.
+    }
+  }
+
+  return notificationId ? [notificationId] : undefined;
+}
 
 function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
   return {
@@ -27,10 +47,12 @@ function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
     time: row.time,
     startDate: row.start_date,
     endDate: row.end_date ?? undefined,
-    repeatDays: row.repeat_days
-      ? JSON.parse(row.repeat_days)
-      : undefined,
+    repeatDays: row.repeat_days ? JSON.parse(row.repeat_days) : undefined,
     notificationId: row.notification_id ?? undefined,
+    notificationIds: parseNotificationIds(
+      row.notification_ids,
+      row.notification_id,
+    ),
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -42,7 +64,7 @@ function generateId(): string {
 }
 
 export async function createSchedule(
-  input: CreateScheduleInput
+  input: CreateScheduleInput,
 ): Promise<MedicationSchedule> {
   const db = await getDatabase();
 
@@ -70,13 +92,11 @@ export async function createSchedule(
       input.time,
       input.startDate,
       input.endDate ?? null,
-      input.repeatDays
-        ? JSON.stringify(input.repeatDays)
-        : null,
+      input.repeatDays ? JSON.stringify(input.repeatDays) : null,
       1,
       now,
       now,
-    ]
+    ],
   );
 
   return {
@@ -94,7 +114,7 @@ export async function createSchedule(
 }
 
 export async function getSchedulesByMedicationId(
-  medicationId: string
+  medicationId: string,
 ): Promise<MedicationSchedule[]> {
   const db = await getDatabase();
 
@@ -103,14 +123,14 @@ export async function getSchedulesByMedicationId(
      FROM schedules
      WHERE medication_id = ?
      ORDER BY time ASC`,
-    [medicationId]
+    [medicationId],
   );
 
   return rows.map(mapScheduleRow);
 }
 
 export async function getScheduleById(
-  id: string
+  id: string,
 ): Promise<MedicationSchedule | null> {
   const db = await getDatabase();
 
@@ -118,7 +138,7 @@ export async function getScheduleById(
     `SELECT *
      FROM schedules
      WHERE id = ?`,
-    [id]
+    [id],
   );
 
   return row ? mapScheduleRow(row) : null;
@@ -126,7 +146,7 @@ export async function getScheduleById(
 
 export async function setScheduleNotificationId(
   id: string,
-  notificationId: string | null
+  notificationId: string | null,
 ): Promise<void> {
   const db = await getDatabase();
 
@@ -135,11 +155,31 @@ export async function setScheduleNotificationId(
      SET notification_id = ?,
          updated_at = ?
      WHERE id = ?`,
+    [notificationId, new Date().toISOString(), id],
+  );
+
+  if (result.changes === 0) {
+    throw new Error("Schedule not found.");
+  }
+}
+
+export async function setScheduleNotificationIds(
+  id: string,
+  notificationIds: string[],
+): Promise<void> {
+  const db = await getDatabase();
+
+  const result = await db.runAsync(
+    `UPDATE schedules
+     SET notification_ids = ?,
+         notification_id = NULL,
+         updated_at = ?
+     WHERE id = ?`,
     [
-      notificationId,
+      notificationIds.length > 0 ? JSON.stringify(notificationIds) : null,
       new Date().toISOString(),
       id,
-    ]
+    ],
   );
 
   if (result.changes === 0) {
@@ -149,7 +189,7 @@ export async function setScheduleNotificationId(
 
 export async function setScheduleActive(
   id: string,
-  isActive: boolean
+  isActive: boolean,
 ): Promise<void> {
   const db = await getDatabase();
 
@@ -158,11 +198,7 @@ export async function setScheduleActive(
      SET is_active = ?,
          updated_at = ?
      WHERE id = ?`,
-    [
-      isActive ? 1 : 0,
-      new Date().toISOString(),
-      id,
-    ]
+    [isActive ? 1 : 0, new Date().toISOString(), id],
   );
 
   if (result.changes === 0) {
@@ -170,15 +206,13 @@ export async function setScheduleActive(
   }
 }
 
-export async function deleteSchedule(
-  id: string
-): Promise<void> {
+export async function deleteSchedule(id: string): Promise<void> {
   const db = await getDatabase();
 
   const result = await db.runAsync(
     `DELETE FROM schedules
      WHERE id = ?`,
-    [id]
+    [id],
   );
 
   if (result.changes === 0) {

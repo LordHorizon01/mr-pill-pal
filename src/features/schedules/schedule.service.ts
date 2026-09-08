@@ -6,260 +6,491 @@ import {
   getScheduleById,
   getSchedulesByMedicationId,
   setScheduleActive,
-  setScheduleNotificationId,
+  setScheduleNotificationIds,
 } from "./schedule.repository";
 
 import {
-  cancelScheduledNotification,
+  cancelScheduledNotifications,
   scheduleDailyMedicationReminder,
+  scheduleOneTimeMedicationReminder,
+  scheduleWeeklyMedicationReminders,
 } from "@/notifications/notification.service";
 
-import { CreateScheduleInput, MedicationSchedule } from "./schedule.types";
+import {
+  CreateScheduleInput,
+  MedicationSchedule,
+} from "./schedule.types";
 
 function validateTime(time: string): string {
   const trimmedTime = time.trim();
 
-  const timePattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
+  const timePattern =
+    /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   if (!timePattern.test(trimmedTime)) {
-    throw new Error("Time must be in 24-hour HH:mm format.");
+    throw new Error(
+      "Time must be in 24-hour HH:mm format."
+    );
   }
 
   return trimmedTime;
 }
 
-function validateDate(date: string, fieldName: string): string {
+function validateDate(
+  date: string,
+  fieldName: string
+): string {
   const trimmedDate = date.trim();
 
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const datePattern =
+    /^\d{4}-\d{2}-\d{2}$/;
 
   if (!datePattern.test(trimmedDate)) {
-    throw new Error(`${fieldName} must be in YYYY-MM-DD format.`);
+    throw new Error(
+      `${fieldName} must be in YYYY-MM-DD format.`
+    );
   }
 
-  const parsedDate = new Date(`${trimmedDate}T00:00:00`);
+  const parsedDate = new Date(
+    `${trimmedDate}T00:00:00`
+  );
 
   if (Number.isNaN(parsedDate.getTime())) {
-    throw new Error(`${fieldName} is invalid.`);
+    throw new Error(
+      `${fieldName} is invalid.`
+    );
   }
 
-  const [year, month, day] = trimmedDate.split("-").map(Number);
+  const [year, month, day] =
+    trimmedDate.split("-").map(Number);
 
   if (
     parsedDate.getFullYear() !== year ||
     parsedDate.getMonth() + 1 !== month ||
     parsedDate.getDate() !== day
   ) {
-    throw new Error(`${fieldName} is invalid.`);
+    throw new Error(
+      `${fieldName} is invalid.`
+    );
   }
 
   return trimmedDate;
 }
 
-function validateRepeatDays(repeatDays?: number[]): number[] | undefined {
+function validateRepeatDays(
+  repeatDays?: number[]
+): number[] | undefined {
   if (repeatDays === undefined) {
     return undefined;
   }
 
-  const uniqueDays = [...new Set(repeatDays)];
+  const uniqueDays = [
+    ...new Set(repeatDays),
+  ];
 
-  const hasInvalidDay = uniqueDays.some(
-    (day) => !Number.isInteger(day) || day < 0 || day > 6,
-  );
+  const hasInvalidDay =
+    uniqueDays.some(
+      (day) =>
+        !Number.isInteger(day) ||
+        day < 0 ||
+        day > 6
+    );
 
   if (hasInvalidDay) {
-    throw new Error("Repeat days must contain values from 0 to 6.");
+    throw new Error(
+      "Repeat days must contain values from 0 to 6."
+    );
   }
 
-  return uniqueDays.sort((a, b) => a - b);
+  return uniqueDays.sort(
+    (a, b) => a - b
+  );
+}
+
+function getStoredNotificationIds(
+  schedule: MedicationSchedule
+): string[] {
+  if (
+    schedule.notificationIds &&
+    schedule.notificationIds.length > 0
+  ) {
+    return schedule.notificationIds;
+  }
+
+  if (schedule.notificationId) {
+    return [schedule.notificationId];
+  }
+
+  return [];
+}
+
+async function scheduleNativeNotifications(
+  medicationName: string,
+  schedule: MedicationSchedule
+): Promise<string[]> {
+  if (schedule.type === "one_time") {
+    const notificationId =
+      await scheduleOneTimeMedicationReminder(
+        medicationName,
+        schedule.startDate,
+        schedule.time
+      );
+
+    return [notificationId];
+  }
+
+  const repeatDays =
+    schedule.repeatDays ?? [];
+
+  if (repeatDays.length === 0) {
+    throw new Error(
+      "Recurring schedule has no repeat days."
+    );
+  }
+
+  if (repeatDays.length === 7) {
+    const notificationId =
+      await scheduleDailyMedicationReminder(
+        medicationName,
+        schedule.time
+      );
+
+    return [notificationId];
+  }
+
+  return scheduleWeeklyMedicationReminders(
+    medicationName,
+    schedule.time,
+    repeatDays
+  );
 }
 
 export async function addSchedule(
-  input: CreateScheduleInput,
+  input: CreateScheduleInput
 ): Promise<MedicationSchedule> {
   if (!input.medicationId.trim()) {
-    throw new Error("Medication ID is required.");
+    throw new Error(
+      "Medication ID is required."
+    );
   }
 
-  const medication = await getMedicationById(input.medicationId);
+  const medication =
+    await getMedicationById(
+      input.medicationId
+    );
 
   if (!medication) {
-    throw new Error("Medication not found.");
+    throw new Error(
+      "Medication not found."
+    );
   }
 
-  const startDate = validateDate(input.startDate, "Start date");
+  const startDate = validateDate(
+    input.startDate,
+    "Start date"
+  );
 
   const endDate =
     input.endDate !== undefined
-      ? validateDate(input.endDate, "End date")
+      ? validateDate(
+          input.endDate,
+          "End date"
+        )
       : undefined;
 
-  if (endDate && endDate < startDate) {
-    throw new Error("End date cannot be before start date.");
-  }
-
-  const repeatDays = validateRepeatDays(input.repeatDays);
-
-  if (input.type === "recurring" && (!repeatDays || repeatDays.length === 0)) {
-    throw new Error("Recurring schedules require at least one repeat day.");
-  }
-
-  const normalizedTime = validateTime(input.time);
-
-  const existingSchedules = await getSchedulesByMedicationId(
-    input.medicationId,
-  );
-
-  const duplicateSchedule = existingSchedules.some((schedule) => {
-    const existingDays = schedule.repeatDays ?? [];
-    const newDays = repeatDays ?? [];
-
-    const sameDays =
-      existingDays.length === newDays.length &&
-      existingDays.every((day, index) => day === newDays[index]);
-
-    return (
-      schedule.type === input.type &&
-      schedule.time === normalizedTime &&
-      sameDays &&
-      schedule.startDate === startDate &&
-      schedule.endDate === endDate
+  if (
+    endDate &&
+    endDate < startDate
+  ) {
+    throw new Error(
+      "End date cannot be before start date."
     );
-  });
+  }
+
+  const repeatDays =
+    validateRepeatDays(
+      input.repeatDays
+    );
+
+  if (
+    input.type === "recurring" &&
+    (!repeatDays ||
+      repeatDays.length === 0)
+  ) {
+    throw new Error(
+      "Recurring schedules require at least one repeat day."
+    );
+  }
+
+  if (
+    input.type === "recurring" &&
+    endDate !== undefined
+  ) {
+    throw new Error(
+      "End dates for recurring schedules are not supported yet."
+    );
+  }
+
+  const normalizedTime =
+    validateTime(input.time);
+
+  const existingSchedules =
+    await getSchedulesByMedicationId(
+      input.medicationId
+    );
+
+  const duplicateSchedule =
+    existingSchedules.some(
+      (schedule) => {
+        const existingDays =
+          schedule.repeatDays ?? [];
+
+        const newDays =
+          repeatDays ?? [];
+
+        const sameDays =
+          existingDays.length ===
+            newDays.length &&
+          existingDays.every(
+            (day, index) =>
+              day === newDays[index]
+          );
+
+        return (
+          schedule.type ===
+            input.type &&
+          schedule.time ===
+            normalizedTime &&
+          sameDays &&
+          schedule.startDate ===
+            startDate &&
+          schedule.endDate ===
+            endDate
+        );
+      }
+    );
 
   if (duplicateSchedule) {
-    throw new Error("This medication already has the same reminder schedule.");
+    throw new Error(
+      "This medication already has the same reminder schedule."
+    );
   }
 
-  const schedule = await createSchedule({
-    medicationId: input.medicationId,
-    type: input.type,
-    time: normalizedTime,
-    startDate,
-    endDate,
-    repeatDays: input.type === "recurring" ? repeatDays : undefined,
-  });
+  const schedule =
+    await createSchedule({
+      medicationId:
+        input.medicationId,
+      type: input.type,
+      time: normalizedTime,
+      startDate,
+      endDate,
+      repeatDays:
+        input.type === "recurring"
+          ? repeatDays
+          : undefined,
+    });
 
   try {
-    const notificationId = await scheduleDailyMedicationReminder(
-      medication.name,
-      schedule.time,
-    );
+    const notificationIds =
+      await scheduleNativeNotifications(
+        medication.name,
+        schedule
+      );
 
     try {
-      await setScheduleNotificationId(schedule.id, notificationId);
+      await setScheduleNotificationIds(
+        schedule.id,
+        notificationIds
+      );
 
       return {
         ...schedule,
-        notificationId,
+        notificationId: undefined,
+        notificationIds,
       };
     } catch (databaseError) {
-      // Native notification was created but its ID
-      // could not be persisted. Cancel it so that
-      // we never leave an orphan reminder.
-      await cancelScheduledNotification(notificationId);
+      await cancelScheduledNotifications(
+        notificationIds
+      );
 
       throw databaseError;
     }
   } catch (notificationError) {
     console.error(
       "Schedule saved, but reminder scheduling failed:",
-      notificationError,
+      notificationError
     );
 
-    return schedule;
+    await setScheduleActive(
+      schedule.id,
+      false
+    );
+
+    return {
+      ...schedule,
+      isActive: false,
+    };
   }
 }
 
 export async function getMedicationSchedules(
-  medicationId: string,
+  medicationId: string
 ): Promise<MedicationSchedule[]> {
   if (!medicationId.trim()) {
-    throw new Error("Medication ID is required.");
+    throw new Error(
+      "Medication ID is required."
+    );
   }
 
-  return getSchedulesByMedicationId(medicationId);
+  return getSchedulesByMedicationId(
+    medicationId
+  );
 }
 
 export async function getSchedule(
-  id: string,
+  id: string
 ): Promise<MedicationSchedule | null> {
   if (!id.trim()) {
-    throw new Error("Schedule ID is required.");
+    throw new Error(
+      "Schedule ID is required."
+    );
   }
 
   return getScheduleById(id);
 }
 
-export async function pauseSchedule(id: string): Promise<void> {
+export async function pauseSchedule(
+  id: string
+): Promise<void> {
   if (!id.trim()) {
-    throw new Error("Schedule ID is required.");
+    throw new Error(
+      "Schedule ID is required."
+    );
   }
 
-  const schedule = await getScheduleById(id);
+  const schedule =
+    await getScheduleById(id);
 
   if (!schedule) {
-    throw new Error("Schedule not found.");
+    throw new Error(
+      "Schedule not found."
+    );
   }
 
-  if (schedule.notificationId) {
-    await cancelScheduledNotification(schedule.notificationId);
+  const notificationIds =
+    getStoredNotificationIds(
+      schedule
+    );
+
+  if (
+    notificationIds.length > 0
+  ) {
+    await cancelScheduledNotifications(
+      notificationIds
+    );
   }
 
-  await setScheduleNotificationId(id, null);
-  await setScheduleActive(id, false);
-}
-
-export async function resumeSchedule(id: string): Promise<string> {
-  if (!id.trim()) {
-    throw new Error("Schedule ID is required.");
-  }
-
-  const schedule = await getScheduleById(id);
-
-  if (!schedule) {
-    throw new Error("Schedule not found.");
-  }
-
-  const medication = await getMedicationById(schedule.medicationId);
-
-  if (!medication) {
-    throw new Error("Medication not found.");
-  }
-
-  const notificationId = await scheduleDailyMedicationReminder(
-    medication.name,
-    schedule.time,
+  await setScheduleNotificationIds(
+    id,
+    []
   );
 
+  await setScheduleActive(
+    id,
+    false
+  );
+}
+
+export async function resumeSchedule(
+  id: string
+): Promise<string[]> {
+  if (!id.trim()) {
+    throw new Error(
+      "Schedule ID is required."
+    );
+  }
+
+  const schedule =
+    await getScheduleById(id);
+
+  if (!schedule) {
+    throw new Error(
+      "Schedule not found."
+    );
+  }
+
+  const medication =
+    await getMedicationById(
+      schedule.medicationId
+    );
+
+  if (!medication) {
+    throw new Error(
+      "Medication not found."
+    );
+  }
+
+  const notificationIds =
+    await scheduleNativeNotifications(
+      medication.name,
+      schedule
+    );
+
   try {
-    await setScheduleNotificationId(id, notificationId);
+    await setScheduleNotificationIds(
+      id,
+      notificationIds
+    );
 
-    await setScheduleActive(id, true);
+    await setScheduleActive(
+      id,
+      true
+    );
 
-    return notificationId;
+    return notificationIds;
   } catch (error) {
-    await cancelScheduledNotification(notificationId);
+    await cancelScheduledNotifications(
+      notificationIds
+    );
 
-    await setScheduleNotificationId(id, null);
+    await setScheduleNotificationIds(
+      id,
+      []
+    );
 
     throw error;
   }
 }
 
-export async function removeSchedule(id: string): Promise<void> {
+export async function removeSchedule(
+  id: string
+): Promise<void> {
   if (!id.trim()) {
-    throw new Error("Schedule ID is required.");
+    throw new Error(
+      "Schedule ID is required."
+    );
   }
 
-  const schedule = await getScheduleById(id);
+  const schedule =
+    await getScheduleById(id);
 
   if (!schedule) {
-    throw new Error("Schedule not found.");
+    throw new Error(
+      "Schedule not found."
+    );
   }
 
-  if (schedule.notificationId) {
-    await cancelScheduledNotification(schedule.notificationId);
+  const notificationIds =
+    getStoredNotificationIds(
+      schedule
+    );
+
+  if (
+    notificationIds.length > 0
+  ) {
+    await cancelScheduledNotifications(
+      notificationIds
+    );
   }
 
   await deleteSchedule(id);

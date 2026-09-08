@@ -9,6 +9,7 @@ export interface MedicationSchedule {
   endDate?: string;
   repeatDays?: number[];
   notificationId?: string;
+  notificationIds?: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

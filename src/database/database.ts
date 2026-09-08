@@ -36,7 +36,7 @@ export async function initializeDatabase(): Promise<void> {
   }>(`PRAGMA table_info(schedules);`);
 
   const hasNotificationId = scheduleColumns.some(
-    (column) => column.name === "notification_id"
+    (column) => column.name === "notification_id",
   );
 
   if (!hasNotificationId) {
@@ -44,5 +44,16 @@ export async function initializeDatabase(): Promise<void> {
       ALTER TABLE schedules
       ADD COLUMN notification_id TEXT;
     `);
+  }
+
+  const hasNotificationIds = scheduleColumns.some(
+    (column) => column.name === "notification_ids",
+  );
+
+  if (!hasNotificationIds) {
+    await db.execAsync(`
+    ALTER TABLE schedules
+    ADD COLUMN notification_ids TEXT;
+  `);
   }
 }
