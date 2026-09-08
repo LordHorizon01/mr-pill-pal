@@ -8,8 +8,9 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-
-import { useSchedules } from "@/hooks/useSchedules";
+import {
+  scheduleTestNotification,
+} from "@/notifications/notification.service"; import { useSchedules } from "@/hooks/useSchedules";
 
 export default function ScheduleScreen() {
   const { medicationId, medicationName } =
@@ -67,6 +68,13 @@ export default function ScheduleScreen() {
       setIsSaving(false);
     }
   }
+  async function handleTestNotification() {
+    try {
+      await scheduleTestNotification();
+    } catch (error) {
+      console.error("Test notification failed:", error);
+    }
+  }
 
   return (
     <View style={styles.container}>
@@ -112,6 +120,15 @@ export default function ScheduleScreen() {
           {isSaving
             ? "Saving..."
             : "Add Daily Schedule"}
+        </Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        onPress={handleTestNotification}
+        style={styles.testButton}
+      >
+        <Text style={styles.testButtonText}>
+          Test Notification
         </Text>
       </Pressable>
 
@@ -284,5 +301,19 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: 12,
+  },
+  testButton: {
+    minHeight: 52,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#222222",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  testButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

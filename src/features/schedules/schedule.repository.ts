@@ -13,6 +13,7 @@ type ScheduleRow = {
   start_date: string;
   end_date: string | null;
   repeat_days: string | null;
+  notification_id: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -29,6 +30,7 @@ function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
     repeatDays: row.repeat_days
       ? JSON.parse(row.repeat_days)
       : undefined,
+    notificationId: row.notification_id ?? undefined,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -120,6 +122,29 @@ export async function getScheduleById(
   );
 
   return row ? mapScheduleRow(row) : null;
+}
+
+export async function setScheduleNotificationId(
+  id: string,
+  notificationId: string | null
+): Promise<void> {
+  const db = await getDatabase();
+
+  const result = await db.runAsync(
+    `UPDATE schedules
+     SET notification_id = ?,
+         updated_at = ?
+     WHERE id = ?`,
+    [
+      notificationId,
+      new Date().toISOString(),
+      id,
+    ]
+  );
+
+  if (result.changes === 0) {
+    throw new Error("Schedule not found.");
+  }
 }
 
 export async function setScheduleActive(

@@ -30,4 +30,19 @@ export async function initializeDatabase(): Promise<void> {
   await db.execAsync(CREATE_MEDICATIONS_TABLE);
   await db.execAsync(CREATE_SCHEDULES_TABLE);
   await db.execAsync(CREATE_DOSE_RECORDS_TABLE);
+
+  const scheduleColumns = await db.getAllAsync<{
+    name: string;
+  }>(`PRAGMA table_info(schedules);`);
+
+  const hasNotificationId = scheduleColumns.some(
+    (column) => column.name === "notification_id"
+  );
+
+  if (!hasNotificationId) {
+    await db.execAsync(`
+      ALTER TABLE schedules
+      ADD COLUMN notification_id TEXT;
+    `);
+  }
 }

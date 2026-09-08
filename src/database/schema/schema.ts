@@ -20,6 +20,7 @@ export const CREATE_SCHEDULES_TABLE = `
     start_date TEXT NOT NULL,
     end_date TEXT,
     repeat_days TEXT,
+    notification_id TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

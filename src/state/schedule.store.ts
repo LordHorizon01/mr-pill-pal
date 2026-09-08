@@ -102,6 +102,7 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
             ? {
                 ...schedule,
                 isActive: false,
+                notificationID: undefined,
                 updatedAt: new Date().toISOString(),
               }
             : schedule
@@ -123,7 +124,7 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     set({ error: null });
 
     try {
-      await resumeScheduleService(id);
+      const notificationId = await resumeScheduleService(id);
 
       set((state) => ({
         schedules: state.schedules.map((schedule) =>
