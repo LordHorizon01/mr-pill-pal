@@ -1,4 +1,4 @@
-import { getDatabase } from "@/database/database";
+import { runDatabaseOperation } from "@/database/database";
 
 import {
   CreateMedicationInput,
@@ -33,13 +33,12 @@ function mapMedicationRow(row: MedicationRow): Medication {
 export async function createMedication(
   input: CreateMedicationInput
 ): Promise<Medication> {
-  const db = await getDatabase();
-
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const now = new Date().toISOString();
 
-  await db.runAsync(
-    `INSERT INTO medications
+  return runDatabaseOperation(async (db) => {
+    await db.runAsync(
+      `INSERT INTO medications
       (
         id,
         name,
@@ -60,64 +59,70 @@ export async function createMedication(
       1,
       now,
       now,
-    ]
-  );
+      ]
+    );
 
-  return {
-    id,
-    name: input.name,
-    dosage: input.dosage,
-    instructions: input.instructions,
-    notes: input.notes,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  };
+    return {
+      id,
+      name: input.name,
+      dosage: input.dosage,
+      instructions: input.instructions,
+      notes: input.notes,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
 }
 
 export async function getMedications(): Promise<Medication[]> {
-  const db = await getDatabase();
-
-  const rows = await db.getAllAsync<MedicationRow>(
-    `SELECT *
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<MedicationRow>(
+      `SELECT *
      FROM medications
      ORDER BY created_at DESC`
-  );
+    );
 
-  return rows.map(mapMedicationRow);
+    return rows.map(mapMedicationRow);
+  });
 }
 
 export async function getMedicationById(
   id: string
 ): Promise<Medication | null> {
-  const db = await getDatabase();
-
-  const row = await db.getFirstAsync<MedicationRow>(
-    `SELECT *
+  return runDatabaseOperation(async (db) => {
+    const row = await db.getFirstAsync<MedicationRow>(
+      `SELECT *
      FROM medications
      WHERE id = ?`,
-    [id]
-  );
+      [id]
+    );
 
-  return row ? mapMedicationRow(row) : null;
+    return row ? mapMedicationRow(row) : null;
+  });
 }
 
 export async function updateMedication(
   id: string,
   input: UpdateMedicationInput
 ): Promise<void> {
-  const db = await getDatabase();
+  await runDatabaseOperation(async (db) => {
+    const row = await db.getFirstAsync<MedicationRow>(
+      `SELECT *
+       FROM medications
+       WHERE id = ?`,
+      [id],
+    );
 
-  const existing = await getMedicationById(id);
+    if (!row) {
+      throw new Error("Medication not found.");
+    }
 
-  if (!existing) {
-    throw new Error("Medication not found.");
-  }
+    const existing = mapMedicationRow(row);
+    const updatedAt = new Date().toISOString();
 
-  const updatedAt = new Date().toISOString();
-
-  await db.runAsync(
-    `UPDATE medications
+    await db.runAsync(
+      `UPDATE medications
      SET
        name = ?,
        dosage = ?,
@@ -126,24 +131,25 @@ export async function updateMedication(
        is_active = ?,
        updated_at = ?
      WHERE id = ?`,
-    [
-      input.name ?? existing.name,
-      input.dosage ?? existing.dosage,
-      input.instructions ?? existing.instructions ?? null,
-      input.notes ?? existing.notes ?? null,
-      (input.isActive ?? existing.isActive) ? 1 : 0,
-      updatedAt,
-      id,
-    ]
-  );
+      [
+        input.name ?? existing.name,
+        input.dosage ?? existing.dosage,
+        input.instructions ?? existing.instructions ?? null,
+        input.notes ?? existing.notes ?? null,
+        (input.isActive ?? existing.isActive) ? 1 : 0,
+        updatedAt,
+        id,
+      ]
+    );
+  });
 }
 
 export async function deleteMedication(id: string): Promise<void> {
-  const db = await getDatabase();
-
-  await db.runAsync(
-    `DELETE FROM medications
+  await runDatabaseOperation(async (db) => {
+    await db.runAsync(
+      `DELETE FROM medications
      WHERE id = ?`,
-    [id]
-  );
+      [id]
+    );
+  });
 }

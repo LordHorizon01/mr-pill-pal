@@ -23,6 +23,7 @@ export const CREATE_SCHEDULES_TABLE = `
     notification_id TEXT,
     notification_ids TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
+    reminder_status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (medication_id)
@@ -47,5 +48,13 @@ export const CREATE_DOSE_RECORDS_TABLE = `
     FOREIGN KEY (schedule_id)
       REFERENCES schedules(id)
       ON DELETE CASCADE
+  );
+`;
+
+export const CREATE_APP_SETTINGS_TABLE = `
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   );
 `;

@@ -1,6 +1,10 @@
-import { getDatabase } from "@/database/database";
+import { runDatabaseOperation } from "@/database/database";
 
-import { CreateScheduleInput, MedicationSchedule } from "./schedule.types";
+import {
+  CreateScheduleInput,
+  MedicationSchedule,
+  ReminderStatus,
+} from "./schedule.types";
 
 type ScheduleRow = {
   id: string;
@@ -13,6 +17,7 @@ type ScheduleRow = {
   notification_id: string | null;
   notification_ids: string | null;
   is_active: number;
+  reminder_status: ReminderStatus | null;
   created_at: string;
   updated_at: string;
 };
@@ -54,6 +59,8 @@ function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
       row.notification_id,
     ),
     isActive: row.is_active === 1,
+    reminderStatus:
+      row.reminder_status ?? (row.is_active === 1 ? "active" : "paused"),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -66,13 +73,12 @@ function generateId(): string {
 export async function createSchedule(
   input: CreateScheduleInput,
 ): Promise<MedicationSchedule> {
-  const db = await getDatabase();
-
   const id = generateId();
   const now = new Date().toISOString();
 
-  await db.runAsync(
-    `INSERT INTO schedules (
+  return runDatabaseOperation(async (db) => {
+    await db.runAsync(
+      `INSERT INTO schedules (
       id,
       medication_id,
       type,
@@ -81,10 +87,11 @@ export async function createSchedule(
       end_date,
       repeat_days,
       is_active,
+      reminder_status,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.medicationId,
@@ -94,128 +101,181 @@ export async function createSchedule(
       input.endDate ?? null,
       input.repeatDays ? JSON.stringify(input.repeatDays) : null,
       1,
+      "active",
       now,
       now,
-    ],
-  );
+      ],
+    );
 
-  return {
-    id,
-    medicationId: input.medicationId,
-    type: input.type,
-    time: input.time,
-    startDate: input.startDate,
-    endDate: input.endDate,
-    repeatDays: input.repeatDays,
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-  };
+    return {
+      id,
+      medicationId: input.medicationId,
+      type: input.type,
+      time: input.time,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      repeatDays: input.repeatDays,
+      isActive: true,
+      reminderStatus: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
 }
 
 export async function getSchedulesByMedicationId(
   medicationId: string,
 ): Promise<MedicationSchedule[]> {
-  const db = await getDatabase();
-
-  const rows = await db.getAllAsync<ScheduleRow>(
-    `SELECT *
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      `SELECT *
      FROM schedules
      WHERE medication_id = ?
      ORDER BY time ASC`,
-    [medicationId],
-  );
+      [medicationId],
+    );
 
-  return rows.map(mapScheduleRow);
+    return rows.map(mapScheduleRow);
+  });
+}
+
+export async function getActiveSchedules(): Promise<MedicationSchedule[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      `SELECT *
+     FROM schedules
+     WHERE is_active = 1
+     ORDER BY time ASC`,
+    );
+
+    return rows.map(mapScheduleRow);
+  });
 }
 
 export async function getScheduleById(
   id: string,
 ): Promise<MedicationSchedule | null> {
-  const db = await getDatabase();
-
-  const row = await db.getFirstAsync<ScheduleRow>(
-    `SELECT *
+  return runDatabaseOperation(async (db) => {
+    const row = await db.getFirstAsync<ScheduleRow>(
+      `SELECT *
      FROM schedules
      WHERE id = ?`,
-    [id],
-  );
+      [id],
+    );
 
-  return row ? mapScheduleRow(row) : null;
+    return row ? mapScheduleRow(row) : null;
+  });
 }
 
 export async function setScheduleNotificationId(
   id: string,
   notificationId: string | null,
 ): Promise<void> {
-  const db = await getDatabase();
-
-  const result = await db.runAsync(
-    `UPDATE schedules
+  await runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `UPDATE schedules
      SET notification_id = ?,
          updated_at = ?
      WHERE id = ?`,
-    [notificationId, new Date().toISOString(), id],
-  );
+      [notificationId, new Date().toISOString(), id],
+    );
 
-  if (result.changes === 0) {
-    throw new Error("Schedule not found.");
-  }
+    if (result.changes === 0) {
+      throw new Error("Schedule not found.");
+    }
+  });
 }
 
 export async function setScheduleNotificationIds(
   id: string,
   notificationIds: string[],
 ): Promise<void> {
-  const db = await getDatabase();
-
-  const result = await db.runAsync(
-    `UPDATE schedules
+  await runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `UPDATE schedules
      SET notification_ids = ?,
          notification_id = NULL,
          updated_at = ?
      WHERE id = ?`,
-    [
-      notificationIds.length > 0 ? JSON.stringify(notificationIds) : null,
-      new Date().toISOString(),
-      id,
-    ],
-  );
+      [
+        notificationIds.length > 0 ? JSON.stringify(notificationIds) : null,
+        new Date().toISOString(),
+        id,
+      ],
+    );
 
-  if (result.changes === 0) {
-    throw new Error("Schedule not found.");
-  }
+    if (result.changes === 0) {
+      throw new Error("Schedule not found.");
+    }
+  });
 }
 
 export async function setScheduleActive(
   id: string,
   isActive: boolean,
 ): Promise<void> {
-  const db = await getDatabase();
-
-  const result = await db.runAsync(
-    `UPDATE schedules
+  await runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `UPDATE schedules
      SET is_active = ?,
+         reminder_status = ?,
          updated_at = ?
      WHERE id = ?`,
-    [isActive ? 1 : 0, new Date().toISOString(), id],
-  );
+      [
+        isActive ? 1 : 0,
+        isActive ? "active" : "paused",
+        new Date().toISOString(),
+        id,
+      ],
+    );
 
-  if (result.changes === 0) {
-    throw new Error("Schedule not found.");
-  }
+    if (result.changes === 0) {
+      throw new Error("Schedule not found.");
+    }
+  });
+}
+
+export async function setScheduleReminderState(
+  id: string,
+  reminderStatus: ReminderStatus,
+  notificationIds: string[] = [],
+): Promise<void> {
+  const isActive = reminderStatus === "active";
+
+  await runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `UPDATE schedules
+     SET is_active = ?,
+         reminder_status = ?,
+         notification_ids = ?,
+         notification_id = NULL,
+         updated_at = ?
+     WHERE id = ?`,
+      [
+        isActive ? 1 : 0,
+        reminderStatus,
+        notificationIds.length > 0 ? JSON.stringify(notificationIds) : null,
+        new Date().toISOString(),
+        id,
+      ],
+    );
+
+    if (result.changes === 0) {
+      throw new Error("Schedule not found.");
+    }
+  });
 }
 
 export async function deleteSchedule(id: string): Promise<void> {
-  const db = await getDatabase();
-
-  const result = await db.runAsync(
-    `DELETE FROM schedules
+  await runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `DELETE FROM schedules
      WHERE id = ?`,
-    [id],
-  );
+      [id],
+    );
 
-  if (result.changes === 0) {
-    throw new Error("Schedule not found.");
-  }
+    if (result.changes === 0) {
+      throw new Error("Schedule not found.");
+    }
+  });
 }

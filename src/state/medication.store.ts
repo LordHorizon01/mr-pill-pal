@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getSafeDatabaseErrorMessage } from "@/database/database";
 
 import {
   addMedication,
@@ -54,10 +55,10 @@ export const useMedicationStore = create<MedicationState>((set) => ({
       });
     } catch (error) {
       set({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load medications.",
+        error: getSafeDatabaseErrorMessage(
+          error,
+          "Could not load medications right now. Please try again.",
+        ),
         isLoading: false,
       });
     }
@@ -75,10 +76,10 @@ export const useMedicationStore = create<MedicationState>((set) => ({
 
       return medication;
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to create medication.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not save this medication. Please try again.",
+      );
 
       set({ error: message });
 
@@ -98,12 +99,18 @@ export const useMedicationStore = create<MedicationState>((set) => ({
         medications: updatedMedication,
       });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to update medication.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not update this medication. Please try again.",
+      );
 
-      set({ error: message });
+      try {
+        const medications = await getAllMedications();
+
+        set({ medications, error: message });
+      } catch {
+        set({ error: message });
+      }
 
       throw error;
     }
@@ -121,10 +128,10 @@ export const useMedicationStore = create<MedicationState>((set) => ({
         ),
       }));
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to delete medication.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not delete this medication. Please try again.",
+      );
 
       set({ error: message });
 

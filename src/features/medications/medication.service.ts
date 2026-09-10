@@ -5,6 +5,10 @@ import {
   getMedications,
   updateMedication,
 } from "./medication.repository";
+import { getSchedulesByMedicationId } from "@/features/schedules/schedule.repository";
+import { refreshMedicationReminders } from "@/features/schedules/schedule.service";
+import { MedicationSchedule } from "@/features/schedules/schedule.types";
+import { cancelScheduledNotifications } from "@/notifications/notification.service";
 
 import {
   CreateMedicationInput,
@@ -46,6 +50,20 @@ function cleanOptionalText(value?: string): string | undefined {
   return cleaned ? cleaned : undefined;
 }
 
+function getNotificationIds(schedules: MedicationSchedule[]): string[] {
+  return [
+    ...new Set(
+      schedules.flatMap((schedule) => {
+        if (schedule.notificationIds?.length) {
+          return schedule.notificationIds;
+        }
+
+        return schedule.notificationId ? [schedule.notificationId] : [];
+      })
+    ),
+  ];
+}
+
 export async function addMedication(
   input: CreateMedicationInput
 ): Promise<Medication> {
@@ -81,6 +99,12 @@ export async function editMedication(
     throw new Error("Medication ID is required.");
   }
 
+  const medication = await getMedicationById(id);
+
+  if (!medication) {
+    throw new Error("Medication not found.");
+  }
+
   const validatedInput: UpdateMedicationInput = {};
 
   if (input.name !== undefined) {
@@ -104,6 +128,13 @@ export async function editMedication(
   }
 
   await updateMedication(id, validatedInput);
+
+  if (
+    validatedInput.name !== undefined &&
+    validatedInput.name !== medication.name
+  ) {
+    await refreshMedicationReminders(id, validatedInput.name);
+  }
 }
 
 export async function removeMedication(id: string): Promise<void> {
@@ -115,6 +146,19 @@ export async function removeMedication(id: string): Promise<void> {
 
   if (!medication) {
     throw new Error("Medication not found.");
+  }
+
+  const schedules = await getSchedulesByMedicationId(id);
+  const notificationIds = getNotificationIds(schedules);
+
+  try {
+    if (notificationIds.length > 0) {
+      await cancelScheduledNotifications(notificationIds);
+    }
+  } catch {
+    throw new Error(
+      "Could not stop all reminders, so this medication was not deleted. Please try again."
+    );
   }
 
   await deleteMedication(id);

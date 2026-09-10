@@ -1,8 +1,10 @@
 import { create } from "zustand";
+import { getSafeDatabaseErrorMessage } from "@/database/database";
 
 import {
   addSchedule,
   getMedicationSchedules,
+  getReminderStatusForError,
   pauseSchedule as pauseScheduleService, 
   removeSchedule,
   resumeSchedule as resumeScheduleService,
@@ -56,10 +58,10 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
       });
     } catch (error) {
       set({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load schedules.",
+        error: getSafeDatabaseErrorMessage(
+          error,
+          "Could not load reminders right now. Please try again.",
+        ),
         isLoading: false,
       });
     }
@@ -72,17 +74,27 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
       const schedule = await addSchedule(input);
 
       set((state) => ({
-        schedules: [...state.schedules, schedule].sort(
-          (a, b) => a.time.localeCompare(b.time)
-        ),
+        schedules: state.schedules.some(
+          (existingSchedule) => existingSchedule.id === schedule.id,
+        )
+          ? state.schedules
+          : [...state.schedules, schedule].sort(
+              (a, b) => a.time.localeCompare(b.time),
+            ),
+        error:
+          schedule.reminderStatus === "permission_required"
+            ? "Schedule saved, but notifications are disabled. Enable them, then try again."
+            : schedule.reminderStatus === "scheduling_failed"
+              ? "Schedule saved, but the reminder setup failed. Tap Retry to try again."
+              : null,
       }));
 
       return schedule;
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to create schedule.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not save this reminder. Please try again.",
+      );
 
       set({ error: message });
 
@@ -104,16 +116,17 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
                 isActive: false,
                 notificationId: undefined,
                 notificationIds: undefined,
+                reminderStatus: "paused",
                 updatedAt: new Date().toISOString(),
               }
             : schedule
         ),
       }));
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to pause schedule.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not pause this reminder. Please try again.",
+      );
 
       set({ error: message });
 
@@ -133,18 +146,37 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
             ? {
                 ...schedule,
                 isActive: true,
+                notificationId: undefined,
+                notificationIds,
+                reminderStatus: "active",
                 updatedAt: new Date().toISOString(),
               }
             : schedule
         ),
       }));
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to resume schedule.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not update this reminder. Please try again.",
+      );
 
-      set({ error: message });
+      const reminderStatus = getReminderStatusForError(error);
+
+      set((state) => ({
+        schedules: state.schedules.map((schedule) =>
+          schedule.id === id
+            ? {
+                ...schedule,
+                isActive: false,
+                notificationId: undefined,
+                notificationIds: undefined,
+                reminderStatus,
+                updatedAt: new Date().toISOString(),
+              }
+            : schedule,
+        ),
+        error: message,
+      }));
 
       throw error;
     }
@@ -162,10 +194,10 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
         ),
       }));
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to delete schedule.";
+      const message = getSafeDatabaseErrorMessage(
+        error,
+        "Could not delete this reminder. Please try again.",
+      );
 
       set({ error: message });
 

@@ -2,6 +2,28 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 
 const MEDICATION_CHANNEL_ID = "medication-reminders-v3";
+const PRIVATE_REMINDER_BODY = "It is time for a medication reminder.";
+
+export class NotificationPermissionError extends Error {
+  constructor() {
+    super("Notifications are disabled. Enable notifications, then try again.");
+    this.name = "NotificationPermissionError";
+  }
+}
+
+export class ReminderTimeExpiredError extends Error {
+  constructor() {
+    super("This reminder time has already passed.");
+    this.name = "ReminderTimeExpiredError";
+  }
+}
+
+export class NativeReminderSchedulingError extends Error {
+  constructor() {
+    super("Reminder could not be scheduled. Try again.");
+    this.name = "NativeReminderSchedulingError";
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -12,7 +34,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function initializeNotifications(): Promise<boolean> {
+async function ensureMedicationNotificationChannel(): Promise<void> {
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(MEDICATION_CHANNEL_ID, {
       name: "Medication Reminders",
@@ -21,6 +43,18 @@ export async function initializeNotifications(): Promise<boolean> {
       enableVibrate: true,
     });
   }
+}
+
+export async function hasNotificationPermission(): Promise<boolean> {
+  await ensureMedicationNotificationChannel();
+
+  const permission = await Notifications.getPermissionsAsync();
+
+  return permission.status === "granted";
+}
+
+export async function initializeNotifications(): Promise<boolean> {
+  await ensureMedicationNotificationChannel();
 
   const existingPermission = await Notifications.getPermissionsAsync();
 
@@ -31,6 +65,13 @@ export async function initializeNotifications(): Promise<boolean> {
   const requestedPermission = await Notifications.requestPermissionsAsync();
 
   return requestedPermission.status === "granted";
+}
+
+export async function getScheduledNotificationIds(): Promise<string[]> {
+  const scheduledNotifications =
+    await Notifications.getAllScheduledNotificationsAsync();
+
+  return scheduledNotifications.map((notification) => notification.identifier);
 }
 
 function parseReminderTime(
@@ -61,65 +102,82 @@ function parseReminderTime(
   };
 }
 
+function getMedicationReminderBody(
+  medicationName: string,
+  hideMedicationName: boolean,
+): string {
+  return hideMedicationName
+    ? PRIVATE_REMINDER_BODY
+    : `Time to take ${medicationName}`;
+}
+
 export async function scheduleTestNotification(): Promise<string> {
   const hasPermission = await initializeNotifications();
 
   if (!hasPermission) {
-    throw new Error("Notification permission was not granted.");
+    throw new NotificationPermissionError();
   }
 
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Mr. Pill Pal",
-      body: "Test medication reminder",
-    },
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Mr. Pill Pal",
+        body: "Test medication reminder",
+      },
 
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-      seconds: 5,
-      channelId: MEDICATION_CHANNEL_ID,
-    },
-  });
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 5,
+        channelId: MEDICATION_CHANNEL_ID,
+      },
+    });
+  } catch {
+    throw new NativeReminderSchedulingError();
+  }
 }
 
 export async function scheduleDailyMedicationReminder(
   medicationName: string,
-  time: string
+  time: string,
+  hideMedicationName = false
 ): Promise<string> {
   const hasPermission = await initializeNotifications();
 
   if (!hasPermission) {
-    throw new Error("Notification permission was not granted.");
+    throw new NotificationPermissionError();
   }
 
   const { hour, minute } = parseReminderTime(time);
 
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Medication Reminder",
-      body: `Time to take ${medicationName}`,
-    },
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Medication Reminder",
+        body: getMedicationReminderBody(medicationName, hideMedicationName),
+      },
 
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute,
-      channelId: MEDICATION_CHANNEL_ID,
-    },
-  });
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour,
+        minute,
+        channelId: MEDICATION_CHANNEL_ID,
+      },
+    });
+  } catch {
+    throw new NativeReminderSchedulingError();
+  }
 }
 
 export async function scheduleOneTimeMedicationReminder(
   medicationName: string,
   date: string,
-  time: string
+  time: string,
+  hideMedicationName = false
 ): Promise<string> {
   const hasPermission = await initializeNotifications();
 
   if (!hasPermission) {
-    throw new Error(
-      "Notification permission was not granted."
-    );
+    throw new NotificationPermissionError();
   }
 
   const { hour, minute } = parseReminderTime(time);
@@ -154,36 +212,37 @@ export async function scheduleOneTimeMedicationReminder(
   }
 
   if (reminderDate.getTime() <= Date.now()) {
-    throw new Error(
-      "Reminder date and time must be in the future."
-    );
+    throw new ReminderTimeExpiredError();
   }
 
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Medication Reminder",
-      body: `Time to take ${medicationName}`,
-    },
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Medication Reminder",
+        body: getMedicationReminderBody(medicationName, hideMedicationName),
+      },
 
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: reminderDate,
-      channelId: MEDICATION_CHANNEL_ID,
-    },
-  });
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: reminderDate,
+        channelId: MEDICATION_CHANNEL_ID,
+      },
+    });
+  } catch {
+    throw new NativeReminderSchedulingError();
+  }
 }
 
 export async function scheduleWeeklyMedicationReminders(
   medicationName: string,
   time: string,
-  repeatDays: number[]
+  repeatDays: number[],
+  hideMedicationName = false
 ): Promise<string[]> {
   const hasPermission = await initializeNotifications();
 
   if (!hasPermission) {
-    throw new Error(
-      "Notification permission was not granted."
-    );
+    throw new NotificationPermissionError();
   }
 
   const { hour, minute } = parseReminderTime(time);
@@ -228,7 +287,10 @@ export async function scheduleWeeklyMedicationReminders(
         await Notifications.scheduleNotificationAsync({
           content: {
             title: "Medication Reminder",
-            body: `Time to take ${medicationName}`,
+            body: getMedicationReminderBody(
+              medicationName,
+              hideMedicationName
+            ),
           },
 
           trigger: {
@@ -256,7 +318,7 @@ export async function scheduleWeeklyMedicationReminders(
       )
     );
 
-    throw error;
+    throw new NativeReminderSchedulingError();
   }
 }
 
