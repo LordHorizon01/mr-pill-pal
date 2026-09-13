@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+import { ReminderNotificationMetadata } from "./notification-metadata.types";
 
 const MEDICATION_CHANNEL_ID = "medication-reminders-v3";
 const PRIVATE_REMINDER_BODY = "It is time for a medication reminder.";
@@ -105,10 +106,23 @@ function parseReminderTime(
 function getMedicationReminderBody(
   medicationName: string,
   hideMedicationName: boolean,
+  profileName?: string,
 ): string {
-  return hideMedicationName
-    ? PRIVATE_REMINDER_BODY
-    : `Time to take ${medicationName}`;
+  if (hideMedicationName) return profileName ? `Reminder for ${profileName}` : PRIVATE_REMINDER_BODY;
+  return profileName ? `${profileName} - Time to take ${medicationName}` : `Time to take ${medicationName}`;
+}
+
+function getReminderNotificationData(metadata?: ReminderNotificationMetadata) {
+  if (!metadata) {
+    return undefined;
+  }
+
+  return {
+    ...(metadata.profileId ? { profileId: metadata.profileId } : {}),
+    medicationId: metadata.medicationId,
+    scheduleId: metadata.scheduleId,
+    ...(metadata.doseId ? { doseId: metadata.doseId } : {}),
+  };
 }
 
 export async function scheduleTestNotification(): Promise<string> {
@@ -139,7 +153,9 @@ export async function scheduleTestNotification(): Promise<string> {
 export async function scheduleDailyMedicationReminder(
   medicationName: string,
   time: string,
-  hideMedicationName = false
+  hideMedicationName = false,
+  metadata?: ReminderNotificationMetadata,
+  profileName?: string,
 ): Promise<string> {
   const hasPermission = await initializeNotifications();
 
@@ -153,7 +169,8 @@ export async function scheduleDailyMedicationReminder(
     return await Notifications.scheduleNotificationAsync({
       content: {
         title: "Medication Reminder",
-        body: getMedicationReminderBody(medicationName, hideMedicationName),
+        body: getMedicationReminderBody(medicationName, hideMedicationName, profileName),
+        data: getReminderNotificationData(metadata),
       },
 
       trigger: {
@@ -172,7 +189,9 @@ export async function scheduleOneTimeMedicationReminder(
   medicationName: string,
   date: string,
   time: string,
-  hideMedicationName = false
+  hideMedicationName = false,
+  metadata?: ReminderNotificationMetadata,
+  profileName?: string,
 ): Promise<string> {
   const hasPermission = await initializeNotifications();
 
@@ -219,7 +238,8 @@ export async function scheduleOneTimeMedicationReminder(
     return await Notifications.scheduleNotificationAsync({
       content: {
         title: "Medication Reminder",
-        body: getMedicationReminderBody(medicationName, hideMedicationName),
+        body: getMedicationReminderBody(medicationName, hideMedicationName, profileName),
+        data: getReminderNotificationData(metadata),
       },
 
       trigger: {
@@ -237,7 +257,9 @@ export async function scheduleWeeklyMedicationReminders(
   medicationName: string,
   time: string,
   repeatDays: number[],
-  hideMedicationName = false
+  hideMedicationName = false,
+  metadata?: ReminderNotificationMetadata,
+  profileName?: string,
 ): Promise<string[]> {
   const hasPermission = await initializeNotifications();
 
@@ -289,8 +311,10 @@ export async function scheduleWeeklyMedicationReminders(
             title: "Medication Reminder",
             body: getMedicationReminderBody(
               medicationName,
-              hideMedicationName
+              hideMedicationName,
+              profileName,
             ),
+            data: getReminderNotificationData(metadata),
           },
 
           trigger: {

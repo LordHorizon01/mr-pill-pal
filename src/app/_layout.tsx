@@ -2,7 +2,7 @@ import {
   DarkTheme,
   DefaultTheme,
   Stack,
-  ThemeProvider,
+  ThemeProvider as NavigationThemeProvider,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import {
@@ -10,32 +10,47 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  useColorScheme,
   View,
 } from "react-native";
 import { useEffect, useRef, useState } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 
 import {
   getSafeDatabaseErrorMessage,
   initializeDatabase,
 } from "@/database/database";
 import { AnimatedSplashOverlay } from "@/components/animated-icon";
+import { AppDrawerProvider } from "@/components/app-drawer";
+import { AppColorTokens, ui } from "@/components/ui-tokens";
+import { AppThemeProvider, useAppTheme } from "@/components/app-theme-provider";
 import {
   reconcileReminderHealth,
   ReminderHealthResult,
 } from "@/features/schedules/schedule.service";
+import { generateDoseOccurrencesForDate } from "@/features/doses/dose.service";
+import { useAuthStore } from "@/state/auth.store";
+import { useProfileStore } from "@/state/profile.store";
+import { AuthGate } from "@/components/auth-gate";
+import { useSettingsStore } from "@/state/settings.store";
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const authPhase = useAuthStore((state) => state.phase);
+  const authUser = useAuthStore((state) => state.user);
+  const startAuth = useAuthStore((state) => state.start);
+  const setProfileReady = useAuthStore((state) => state.setProfileReady);
+  const loadSettings = useSettingsStore((state) => state.loadSettings);
+  const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
+  const selectedAccountUid = useProfileStore((state) => state.accountUid);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [isDatabaseReady, setIsDatabaseReady] = useState(false);
   const [isStartupReminderHealthReady, setIsStartupReminderHealthReady] =
     useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [reminderMessage, setReminderMessage] = useState<string | null>(null);
-  const isCheckingReminderHealth = useRef(false);
+  const activeReminderHealthKey = useRef<string | null>(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -71,9 +86,27 @@ export default function RootLayout() {
   }, [startupAttempt]);
 
   useEffect(() => {
-    if (!isDatabaseReady) {
+    if (!isDatabaseReady) return;
+    return startAuth();
+  }, [isDatabaseReady, startAuth]);
+
+  useEffect(() => {
+    if (isDatabaseReady) void loadSettings();
+  }, [isDatabaseReady, loadSettings]);
+
+  useEffect(() => {
+    if (!isDatabaseReady || !authUser || authPhase === "verification_required") return;
+    let current = true;
+    void useProfileStore.getState().loadForAccount(authUser.uid).then((ready) => { if (current) setProfileReady(ready); });
+    return () => { current = false; };
+  }, [authUser?.uid, authPhase === "verification_required", isDatabaseReady, setProfileReady]);
+
+  useEffect(() => {
+    if (!isDatabaseReady || authPhase !== "authenticated" || !selectedProfileId || !selectedAccountUid) {
       return;
     }
+    const accountUid = selectedAccountUid;
+    const profileId = selectedProfileId;
 
     let isCurrent = true;
 
@@ -100,14 +133,15 @@ export default function RootLayout() {
     }
 
     async function checkReminderHealth(isStartupCheck = false) {
-      if (isCheckingReminderHealth.current) {
+      const checkKey = `${accountUid}:${profileId}`;
+      if (activeReminderHealthKey.current === checkKey) {
         return;
       }
 
-      isCheckingReminderHealth.current = true;
+      activeReminderHealthKey.current = checkKey;
 
       try {
-        const result = await reconcileReminderHealth();
+        const result = await reconcileReminderHealth(accountUid);
 
         if (isCurrent) {
           setReminderMessage(messageFor(result));
@@ -118,8 +152,20 @@ export default function RootLayout() {
             "We could not check reminder health. Open your schedules and confirm they say Reminders on.",
           );
         }
+      }
+
+      try {
+        await generateDoseOccurrencesForDate(profileId);
+      } catch {
+        if (isCurrent) {
+          setReminderMessage(
+            "We could not prepare today's doses. Open Today and tap Refresh to try again.",
+          );
+        }
       } finally {
-        isCheckingReminderHealth.current = false;
+        if (activeReminderHealthKey.current === checkKey) {
+          activeReminderHealthKey.current = null;
+        }
 
         if (isStartupCheck && isCurrent) {
           setIsStartupReminderHealthReady(true);
@@ -139,98 +185,66 @@ export default function RootLayout() {
       isCurrent = false;
       subscription.remove();
     };
-  }, [isDatabaseReady]);
+  }, [authPhase, isDatabaseReady, selectedAccountUid, selectedProfileId]);
 
-  if (databaseError) {
-    return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorTitle}>Mr. Pill Pal could not open</Text>
-        <Text style={styles.errorText}>{databaseError}</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setStartupAttempt((attempt) => attempt + 1)}
-          style={styles.retryButton}
-        >
-          <Text style={styles.retryButtonText}>Try again</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  if (databaseError) return <SafeAreaProvider><AppThemeProvider><ThemedStartupError message={databaseError} onRetry={() => setStartupAttempt((attempt) => attempt + 1)} /></AppThemeProvider></SafeAreaProvider>;
 
-  if (!isDatabaseReady || !isStartupReminderHealthReady) {
+  if (!isDatabaseReady || authPhase === "loading") {
     return null;
   }
 
-  return (
-    <ThemeProvider
-      value={
-        colorScheme === "dark"
-          ? DarkTheme
-          : DefaultTheme
-      }
-    >
-      <AnimatedSplashOverlay />
+  if (authPhase !== "authenticated") return <SafeAreaProvider><AppThemeProvider><ThemedAuthGate /></AppThemeProvider></SafeAreaProvider>;
 
-      {reminderMessage ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss reminder status message"
-          onPress={() => setReminderMessage(null)}
-          style={styles.reminderBanner}
-        >
-          <Text style={styles.reminderBannerText}>{reminderMessage}</Text>
-          <Text style={styles.reminderBannerHint}>Tap to dismiss</Text>
-        </Pressable>
-      ) : null}
+  if (!isStartupReminderHealthReady) return null;
 
-      <Stack>
-        <Stack.Screen
-          name="index"
-          options={{
-            headerShown: false,
-          }}
-        />
-
-        <Stack.Screen
-          name="medications"
-          options={{
-            title: "Medications",
-          }}
-        />
-
-        <Stack.Screen
-          name="schedule"
-          options={{
-            title: "Schedule",
-          }}
-        />
-
-        <Stack.Screen
-          name="explore"
-          options={{
-            title: "Explore",
-          }}
-        />
-      </Stack>
-    </ThemeProvider>
-  );
+  return <SafeAreaProvider><AppThemeProvider><ThemedApp reminderMessage={reminderMessage} onDismissReminder={() => setReminderMessage(null)} /></AppThemeProvider></SafeAreaProvider>;
 }
 
-const styles = StyleSheet.create({
+function ThemedAuthGate() {
+  const { mode } = useAppTheme();
+  return <NavigationThemeProvider value={mode === "dark" ? DarkTheme : DefaultTheme}><StatusBar style={mode === "dark" ? "light" : "dark"} /><AuthGate /></NavigationThemeProvider>;
+}
+
+function ThemedStartupError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { colors } = useAppTheme();
+  const themedStyles = createStyles(colors);
+  return <View style={themedStyles.errorContainer}><Text style={themedStyles.errorTitle}>Mr. Pill Pal could not open</Text><Text style={themedStyles.errorText}>{message}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={themedStyles.retryButton}><Text style={themedStyles.retryButtonText}>Try again</Text></Pressable></View>;
+}
+
+function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: string | null; onDismissReminder: () => void }) {
+  const { mode, colors } = useAppTheme();
+  const themedStyles = createStyles(colors);
+  return <NavigationThemeProvider value={mode === "dark" ? DarkTheme : DefaultTheme}>
+    <StatusBar style={mode === "dark" ? "light" : "dark"} />
+    <AnimatedSplashOverlay />
+    {reminderMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss reminder status message" onPress={onDismissReminder} style={[themedStyles.reminderBanner, { backgroundColor: colors.badgeSkippedBackground }]}><Text style={[themedStyles.reminderBannerText, { color: colors.badgeSkippedForeground }]}>{reminderMessage}</Text><Text style={[themedStyles.reminderBannerHint, { color: colors.textSecondary }]}>Tap to dismiss</Text></Pressable> : null}
+    <AppDrawerProvider><Stack screenOptions={{ headerStyle: { backgroundColor: colors.background }, headerTintColor: colors.primary, headerTitleStyle: { fontSize: 20, fontWeight: "700", color: colors.text }, headerShadowVisible: true }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
+      <Stack.Screen name="dose-detail" options={{ title: "Dose details" }} />
+      <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
+      <Stack.Screen name="profiles" options={{ headerShown: false }} />
+    </Stack></AppDrawerProvider>
+  </NavigationThemeProvider>;
+}
+
+const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     padding: 24,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
   errorTitle: {
     fontSize: 24,
     fontWeight: "700",
+    color: colors.textPrimary,
   },
   errorText: {
     marginTop: 12,
     fontSize: 16,
     lineHeight: 23,
+    color: colors.textSecondary,
   },
   retryButton: {
     minHeight: 48,
@@ -239,10 +253,10 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 18,
     borderRadius: 10,
-    backgroundColor: "#222222",
+    backgroundColor: colors.primaryBackground,
   },
   retryButtonText: {
-    color: "#FFFFFF",
+    color: colors.primaryForeground,
     fontSize: 16,
     fontWeight: "600",
   },
@@ -254,7 +268,7 @@ const styles = StyleSheet.create({
     zIndex: 2000,
     padding: 14,
     borderRadius: 10,
-    backgroundColor: "#FFF4DE",
+    backgroundColor: colors.badgeSkippedBackground,
   },
   reminderBannerText: {
     fontSize: 15,

@@ -4,10 +4,12 @@ import {
   CreateScheduleInput,
   MedicationSchedule,
   ReminderStatus,
+  UpdateScheduleInput,
 } from "./schedule.types";
 
 type ScheduleRow = {
   id: string;
+  profile_id: string;
   medication_id: string;
   type: "one_time" | "recurring";
   time: string;
@@ -47,6 +49,7 @@ function parseNotificationIds(
 function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
   return {
     id: row.id,
+    profileId: row.profile_id,
     medicationId: row.medication_id,
     type: row.type,
     time: row.time,
@@ -80,6 +83,7 @@ export async function createSchedule(
     await db.runAsync(
       `INSERT INTO schedules (
       id,
+      profile_id,
       medication_id,
       type,
       time,
@@ -91,9 +95,10 @@ export async function createSchedule(
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      input.profileId ?? null,
       input.medicationId,
       input.type,
       input.time,
@@ -109,6 +114,7 @@ export async function createSchedule(
 
     return {
       id,
+      profileId: input.profileId ?? "",
       medicationId: input.medicationId,
       type: input.type,
       time: input.time,
@@ -124,15 +130,17 @@ export async function createSchedule(
 }
 
 export async function getSchedulesByMedicationId(
-  medicationId: string,
+  profileId: string,
+  medicationId?: string,
 ): Promise<MedicationSchedule[]> {
+  const resolvedMedicationId = medicationId ?? profileId;
   return runDatabaseOperation(async (db) => {
     const rows = await db.getAllAsync<ScheduleRow>(
       `SELECT *
      FROM schedules
-     WHERE medication_id = ?
+     WHERE medication_id = ?${medicationId ? " AND profile_id = ?" : ""}
      ORDER BY time ASC`,
-      [medicationId],
+      medicationId ? [resolvedMedicationId, profileId] : [resolvedMedicationId],
     );
 
     return rows.map(mapScheduleRow);
@@ -146,6 +154,59 @@ export async function getActiveSchedules(): Promise<MedicationSchedule[]> {
      FROM schedules
      WHERE is_active = 1
      ORDER BY time ASC`,
+    );
+
+    return rows.map(mapScheduleRow);
+  });
+}
+
+export async function getActiveSchedulesByProfile(
+  profileId: string,
+): Promise<MedicationSchedule[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      `SELECT * FROM schedules
+       WHERE profile_id = ? AND is_active = 1
+       ORDER BY time ASC`,
+      [profileId],
+    );
+    return rows.map(mapScheduleRow);
+  });
+}
+
+export async function getSchedulesForReminderHealth(accountUid?: string): Promise<MedicationSchedule[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      accountUid
+        ? `SELECT schedules.* FROM schedules INNER JOIN local_profiles ON local_profiles.id = schedules.profile_id
+           WHERE local_profiles.account_uid = ? AND local_profiles.is_active = 1 AND local_profiles.deleted_at IS NULL
+             AND schedules.reminder_status IN ('active', 'permission_required', 'scheduling_failed') ORDER BY schedules.time ASC`
+        : `SELECT * FROM schedules WHERE reminder_status IN ('active', 'permission_required', 'scheduling_failed') ORDER BY time ASC`,
+      accountUid ? [accountUid] : [],
+    );
+
+    return rows.map(mapScheduleRow);
+  });
+}
+
+export async function getSchedulesByAccount(accountUid: string): Promise<MedicationSchedule[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      `SELECT schedules.* FROM schedules INNER JOIN local_profiles ON local_profiles.id = schedules.profile_id
+       WHERE local_profiles.account_uid = ? ORDER BY schedules.time ASC`,
+      [accountUid],
+    );
+    return rows.map(mapScheduleRow);
+  });
+}
+
+export async function getSchedulesNeedingAttention(): Promise<MedicationSchedule[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ScheduleRow>(
+      `SELECT *
+       FROM schedules
+       WHERE reminder_status IN ('permission_required', 'scheduling_failed')
+       ORDER BY time ASC`,
     );
 
     return rows.map(mapScheduleRow);
@@ -263,6 +324,53 @@ export async function setScheduleReminderState(
     if (result.changes === 0) {
       throw new Error("Schedule not found.");
     }
+  });
+}
+
+export async function updateScheduleDetails(
+  id: string,
+  input: UpdateScheduleInput,
+  reminderStatus: Extract<ReminderStatus, "paused" | "scheduling_failed">,
+): Promise<MedicationSchedule> {
+  return runDatabaseOperation(async (db) => {
+    const now = new Date().toISOString();
+    const result = await db.runAsync(
+      `UPDATE schedules
+       SET time = ?,
+           start_date = ?,
+           end_date = ?,
+           repeat_days = ?,
+           is_active = 0,
+           reminder_status = ?,
+           notification_id = NULL,
+           notification_ids = NULL,
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        input.time,
+        input.startDate,
+        input.endDate ?? null,
+        input.repeatDays ? JSON.stringify(input.repeatDays) : null,
+        reminderStatus,
+        now,
+        id,
+      ],
+    );
+
+    if (result.changes !== 1) {
+      throw new Error("Schedule not found.");
+    }
+
+    const row = await db.getFirstAsync<ScheduleRow>(
+      `SELECT * FROM schedules WHERE id = ?`,
+      [id],
+    );
+
+    if (!row) {
+      throw new Error("Schedule not found.");
+    }
+
+    return mapScheduleRow(row);
   });
 }
 

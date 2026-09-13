@@ -8,14 +8,20 @@ import {
   pauseSchedule as pauseScheduleService, 
   removeSchedule,
   resumeSchedule as resumeScheduleService,
+  updateMedicationSchedule,
 } from "@/features/schedules/schedule.service";
 
 import {
   CreateScheduleInput,
   MedicationSchedule,
+  UpdateScheduleInput,
 } from "@/features/schedules/schedule.types";
+import { createAsyncRequestGuard } from "@/state/async-request.domain";
+
+const scheduleLoadGuard = createAsyncRequestGuard();
 
 interface ScheduleState {
+  profileId: string | null;
   schedules: MedicationSchedule[];
   isLoading: boolean;
   error: string | null;
@@ -30,19 +36,24 @@ interface ScheduleState {
 
   resumeSchedule: (id: string) => Promise<void>;
 
+  updateSchedule: (id: string, input: UpdateScheduleInput) => Promise<MedicationSchedule>;
+
   deleteSchedule: (id: string) => Promise<void>;
 
   clearSchedules: () => void;
+  setProfile: (profileId: string | null) => void;
 
   clearError: () => void;
 }
 
-export const useScheduleStore = create<ScheduleState>((set) => ({
+export const useScheduleStore = create<ScheduleState>((set, get) => ({
+  profileId: null,
   schedules: [],
   isLoading: false,
   error: null,
 
   loadSchedules: async (medicationId) => {
+    const requestRevision = scheduleLoadGuard.begin();
     set({
       isLoading: true,
       error: null,
@@ -52,11 +63,14 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
       const schedules =
         await getMedicationSchedules(medicationId);
 
+      if (!scheduleLoadGuard.isCurrent(requestRevision)) return;
+
       set({
         schedules,
         isLoading: false,
       });
     } catch (error) {
+      if (!scheduleLoadGuard.isCurrent(requestRevision)) return;
       set({
         error: getSafeDatabaseErrorMessage(
           error,
@@ -182,6 +196,38 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
     }
   },
 
+  updateSchedule: async (id, input) => {
+    set({ error: null });
+    const existing = get().schedules.find((schedule) => schedule.id === id);
+
+    try {
+      const updatedSchedule = await updateMedicationSchedule(id, input);
+      set((state) => ({
+        schedules: state.schedules
+          .map((schedule) => schedule.id === id ? updatedSchedule : schedule)
+          .sort((a, b) => a.time.localeCompare(b.time)),
+      }));
+      return updatedSchedule;
+    } catch (error) {
+      if (existing) {
+        try {
+          const schedules = await getMedicationSchedules(existing.medicationId);
+          set({ schedules });
+        } catch {
+          // Keep the original edit error as the message shown to the user.
+        }
+      }
+
+      set({
+        error: getSafeDatabaseErrorMessage(
+          error,
+          "Could not update this reminder. Please try again.",
+        ),
+      });
+      throw error;
+    }
+  },
+
   deleteSchedule: async (id) => {
     set({ error: null });
 
@@ -211,6 +257,7 @@ export const useScheduleStore = create<ScheduleState>((set) => ({
       error: null,
     });
   },
+  setProfile: (profileId) => { scheduleLoadGuard.invalidate(); set({ profileId, schedules: [], error: null, isLoading: false }); },
 
   clearError: () => {
     set({ error: null });

@@ -1,165 +1,23 @@
-import {
-  createMedication,
-  deleteMedication,
-  getMedicationById,
-  getMedications,
-  updateMedication,
-} from "./medication.repository";
+import { archiveMedication, createMedication, deleteMedication, getMedicationById, getMedications, restoreMedication, updateMedication } from "./medication.repository";
+import { CreateMedicationInput, Medication, MedicationListFilter, UpdateMedicationInput } from "./medication.types";
+import { hasMedicationChanges } from "./medication.domain";
 import { getSchedulesByMedicationId } from "@/features/schedules/schedule.repository";
-import { refreshMedicationReminders } from "@/features/schedules/schedule.service";
-import { MedicationSchedule } from "@/features/schedules/schedule.types";
 import { cancelScheduledNotifications } from "@/notifications/notification.service";
+import { deletePendingDosesForScheduleFromDate } from "@/features/doses/dose.repository";
+import { toLocalDateString } from "@/features/doses/dose.domain";
+import { pauseSchedule, refreshMedicationReminders } from "@/features/schedules/schedule.service";
 
-import {
-  CreateMedicationInput,
-  Medication,
-  UpdateMedicationInput,
-} from "./medication.types";
+function clean(value?: string): string | undefined { const text = value?.trim(); return text || undefined; }
+function validate(input: CreateMedicationInput): CreateMedicationInput { const name = clean(input.name); const dosage = clean(input.dosage); if (!name || name.length > 100) throw new Error("Medication name is required and must be 100 characters or fewer."); if (!dosage || dosage.length > 100) throw new Error("Dosage is required and must be 100 characters or fewer."); return { name, dosage, instructions: clean(input.instructions), notes: clean(input.notes) }; }
+function ids(schedules: Awaited<ReturnType<typeof getSchedulesByMedicationId>>): string[] { return [...new Set(schedules.flatMap((schedule) => schedule.notificationIds?.length ? schedule.notificationIds : schedule.notificationId ? [schedule.notificationId] : []))]; }
 
-function validateMedicationName(name: string): string {
-  const trimmedName = name.trim();
-
-  if (!trimmedName) {
-    throw new Error("Medication name is required.");
-  }
-
-  if (trimmedName.length > 100) {
-    throw new Error("Medication name must be 100 characters or fewer.");
-  }
-
-  return trimmedName;
+export async function addMedication(profileId: string, input: CreateMedicationInput): Promise<Medication> { return createMedication(profileId, validate(input)); }
+export async function getAllMedications(profileId: string, filter: MedicationListFilter = "active"): Promise<Medication[]> { return getMedications(profileId, filter); }
+export async function getMedication(profileId: string, id: string): Promise<Medication | null> { if (!id.trim()) throw new Error("Medication ID is required."); return getMedicationById(profileId, id); }
+export async function editMedication(profileId: string, id: string, input: UpdateMedicationInput): Promise<void> {
+  const medication = await getMedicationById(profileId, id); if (!medication) throw new Error("Medication not found."); const normalized: UpdateMedicationInput = { ...input, ...(input.name !== undefined ? { name: validate({ name: input.name, dosage: medication.dosage }).name } : {}), ...(input.dosage !== undefined ? { dosage: validate({ name: medication.name, dosage: input.dosage }).dosage } : {}), ...(input.instructions !== undefined ? { instructions: clean(input.instructions) } : {}), ...(input.notes !== undefined ? { notes: clean(input.notes) } : {}) };
+  if (!hasMedicationChanges(medication, normalized)) return; await updateMedication(profileId, id, normalized); if (normalized.name && normalized.name !== medication.name) await refreshMedicationReminders(id, normalized.name);
 }
-
-function validateDosage(dosage: string): string {
-  const trimmedDosage = dosage.trim();
-
-  if (!trimmedDosage) {
-    throw new Error("Dosage is required.");
-  }
-
-  if (trimmedDosage.length > 100) {
-    throw new Error("Dosage must be 100 characters or fewer.");
-  }
-
-  return trimmedDosage;
-}
-
-function cleanOptionalText(value?: string): string | undefined {
-  const cleaned = value?.trim();
-
-  return cleaned ? cleaned : undefined;
-}
-
-function getNotificationIds(schedules: MedicationSchedule[]): string[] {
-  return [
-    ...new Set(
-      schedules.flatMap((schedule) => {
-        if (schedule.notificationIds?.length) {
-          return schedule.notificationIds;
-        }
-
-        return schedule.notificationId ? [schedule.notificationId] : [];
-      })
-    ),
-  ];
-}
-
-export async function addMedication(
-  input: CreateMedicationInput
-): Promise<Medication> {
-  const validatedInput: CreateMedicationInput = {
-    name: validateMedicationName(input.name),
-    dosage: validateDosage(input.dosage),
-    instructions: cleanOptionalText(input.instructions),
-    notes: cleanOptionalText(input.notes),
-  };
-
-  return createMedication(validatedInput);
-}
-
-export async function getAllMedications(): Promise<Medication[]> {
-  return getMedications();
-}
-
-export async function getMedication(
-  id: string
-): Promise<Medication | null> {
-  if (!id.trim()) {
-    throw new Error("Medication ID is required.");
-  }
-
-  return getMedicationById(id);
-}
-
-export async function editMedication(
-  id: string,
-  input: UpdateMedicationInput
-): Promise<void> {
-  if (!id.trim()) {
-    throw new Error("Medication ID is required.");
-  }
-
-  const medication = await getMedicationById(id);
-
-  if (!medication) {
-    throw new Error("Medication not found.");
-  }
-
-  const validatedInput: UpdateMedicationInput = {};
-
-  if (input.name !== undefined) {
-    validatedInput.name = validateMedicationName(input.name);
-  }
-
-  if (input.dosage !== undefined) {
-    validatedInput.dosage = validateDosage(input.dosage);
-  }
-
-  if (input.instructions !== undefined) {
-    validatedInput.instructions = cleanOptionalText(input.instructions);
-  }
-
-  if (input.notes !== undefined) {
-    validatedInput.notes = cleanOptionalText(input.notes);
-  }
-
-  if (input.isActive !== undefined) {
-    validatedInput.isActive = input.isActive;
-  }
-
-  await updateMedication(id, validatedInput);
-
-  if (
-    validatedInput.name !== undefined &&
-    validatedInput.name !== medication.name
-  ) {
-    await refreshMedicationReminders(id, validatedInput.name);
-  }
-}
-
-export async function removeMedication(id: string): Promise<void> {
-  if (!id.trim()) {
-    throw new Error("Medication ID is required.");
-  }
-
-  const medication = await getMedicationById(id);
-
-  if (!medication) {
-    throw new Error("Medication not found.");
-  }
-
-  const schedules = await getSchedulesByMedicationId(id);
-  const notificationIds = getNotificationIds(schedules);
-
-  try {
-    if (notificationIds.length > 0) {
-      await cancelScheduledNotifications(notificationIds);
-    }
-  } catch {
-    throw new Error(
-      "Could not stop all reminders, so this medication was not deleted. Please try again."
-    );
-  }
-
-  await deleteMedication(id);
-}
+export async function removeMedication(profileId: string, id: string): Promise<void> { const medication = await getMedicationById(profileId, id); if (!medication) throw new Error("Medication not found."); const schedules = await getSchedulesByMedicationId(profileId, id); const notificationIds = ids(schedules); if (notificationIds.length) { try { await cancelScheduledNotifications(notificationIds); } catch { throw new Error("Could not stop all reminders, so this medication was not deleted. Please try again."); } } for (const schedule of schedules) await deletePendingDosesForScheduleFromDate(schedule.id, toLocalDateString()); await deleteMedication(profileId, id); }
+export async function archiveMedicationSafely(profileId: string, id: string): Promise<void> { const medication = await getMedicationById(profileId, id); if (!medication) throw new Error("Medication not found."); for (const schedule of await getSchedulesByMedicationId(profileId, id)) if (schedule.isActive) await pauseSchedule(schedule.id); await archiveMedication(profileId, id); }
+export async function restoreMedicationSafely(profileId: string, id: string): Promise<void> { await restoreMedication(profileId, id); }

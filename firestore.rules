@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownAccount(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // Account metadata has no medication data. Owners can read and maintain only their own document.
+    match /accounts/{uid} {
+      allow create: if ownAccount(uid) && request.resource.data.uid == request.auth.uid;
+      allow read: if ownAccount(uid);
+      allow update: if ownAccount(uid)
+        && request.resource.data.uid == resource.data.uid
+        && resource.data.uid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Profiles are owned by one Firebase account. A future caregiver sharing feature must add
+    // explicit access documents and matching rule checks; it must never open this collection.
+    match /profiles/{profileId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow read: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+    }
+  }
+}

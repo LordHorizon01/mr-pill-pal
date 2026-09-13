@@ -3,23 +3,30 @@ import { getSafeDatabaseErrorMessage } from "@/database/database";
 
 import {
   addMedication,
+  archiveMedicationSafely,
   editMedication,
   getAllMedications,
+  restoreMedicationSafely,
   removeMedication,
 } from "@/features/medications/medication.service";
 
 import {
   CreateMedicationInput,
   Medication,
+  MedicationListFilter,
   UpdateMedicationInput,
 } from "@/features/medications/medication.types";
+import { createAsyncRequestGuard } from "@/state/async-request.domain";
+
+const medicationLoadGuard = createAsyncRequestGuard();
 
 interface MedicationState {
+  profileId: string | null;
   medications: Medication[];
   isLoading: boolean;
   error: string | null;
 
-  loadMedications: () => Promise<void>;
+  loadMedications: (filter?: MedicationListFilter) => Promise<void>;
 
   createMedication: (
     input: CreateMedicationInput
@@ -31,29 +38,38 @@ interface MedicationState {
   ) => Promise<void>;
 
   deleteMedication: (id: string) => Promise<void>;
+  archiveMedication: (id: string) => Promise<void>;
+  restoreMedication: (id: string) => Promise<void>;
 
   clearError: () => void;
+  setProfile: (profileId: string | null) => void;
 }
 
 export const useMedicationStore = create<MedicationState>((set) => ({
+  profileId: null,
   medications: [],
   isLoading: false,
   error: null,
 
-  loadMedications: async () => {
+  loadMedications: async (filter = "active") => {
+    const requestRevision = medicationLoadGuard.begin();
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) { if (medicationLoadGuard.isCurrent(requestRevision)) set({ medications: [], isLoading: false, error: null }); return; }
     set({
       isLoading: true,
       error: null,
     });
 
     try {
-      const medications = await getAllMedications();
+      const medications = await getAllMedications(profileId, filter);
+      if (!medicationLoadGuard.isCurrent(requestRevision)) return;
 
       set({
         medications,
         isLoading: false,
       });
     } catch (error) {
+      if (!medicationLoadGuard.isCurrent(requestRevision)) return;
       set({
         error: getSafeDatabaseErrorMessage(
           error,
@@ -65,10 +81,12 @@ export const useMedicationStore = create<MedicationState>((set) => ({
   },
 
   createMedication: async (input) => {
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) throw new Error("Choose a profile before adding medication.");
     set({ error: null });
 
     try {
-      const medication = await addMedication(input);
+      const medication = await addMedication(profileId, input);
 
       set((state) => ({
         medications: [medication, ...state.medications],
@@ -88,12 +106,14 @@ export const useMedicationStore = create<MedicationState>((set) => ({
   },
 
   updateMedication: async (id, input) => {
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) throw new Error("Choose a profile before editing medication.");
     set({ error: null });
 
     try {
-      await editMedication(id, input);
+      await editMedication(profileId, id, input);
 
-      const updatedMedication = await getAllMedications();
+      const updatedMedication = await getAllMedications(profileId);
 
       set({
         medications: updatedMedication,
@@ -105,7 +125,7 @@ export const useMedicationStore = create<MedicationState>((set) => ({
       );
 
       try {
-        const medications = await getAllMedications();
+        const medications = await getAllMedications(profileId);
 
         set({ medications, error: message });
       } catch {
@@ -117,10 +137,12 @@ export const useMedicationStore = create<MedicationState>((set) => ({
   },
 
   deleteMedication: async (id) => {
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) throw new Error("Choose a profile before deleting medication.");
     set({ error: null });
 
     try {
-      await removeMedication(id);
+      await removeMedication(profileId, id);
 
       set((state) => ({
         medications: state.medications.filter(
@@ -139,7 +161,22 @@ export const useMedicationStore = create<MedicationState>((set) => ({
     }
   },
 
+  archiveMedication: async (id) => {
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) throw new Error("Choose a profile before archiving medication.");
+    try { await archiveMedicationSafely(profileId, id); set((state) => ({ medications: state.medications.filter((medication) => medication.id !== id) })); }
+    catch (error) { set({ error: getSafeDatabaseErrorMessage(error, "Could not archive this medication. Please try again.") }); throw error; }
+  },
+
+  restoreMedication: async (id) => {
+    const profileId = useMedicationStore.getState().profileId;
+    if (!profileId) throw new Error("Choose a profile before restoring medication.");
+    try { await restoreMedicationSafely(profileId, id); set((state) => ({ medications: state.medications.filter((medication) => medication.id !== id) })); }
+    catch (error) { set({ error: getSafeDatabaseErrorMessage(error, "Could not restore this medication. Please try again.") }); throw error; }
+  },
+
   clearError: () => {
     set({ error: null });
   },
+  setProfile: (profileId) => { medicationLoadGuard.invalidate(); set({ profileId, medications: [], error: null, isLoading: false }); },
 }));

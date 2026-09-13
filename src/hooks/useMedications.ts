@@ -28,6 +28,8 @@ export function useMedications() {
   const deleteMedication = useMedicationStore(
     (state) => state.deleteMedication
   );
+  const archiveMedication = useMedicationStore((state) => state.archiveMedication);
+  const restoreMedication = useMedicationStore((state) => state.restoreMedication);
 
   const clearError = useMedicationStore(
     (state) => state.clearError
@@ -41,6 +43,8 @@ export function useMedications() {
     createMedication,
     updateMedication,
     deleteMedication,
+    archiveMedication,
+    restoreMedication,
     clearError,
   };
 }

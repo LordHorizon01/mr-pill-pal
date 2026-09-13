@@ -19,9 +19,8 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.mrpillpal",
-      "permissions": [
-        "android.permission.SCHEDULE_EXACT_ALARM"
-      ]
+      "googleServicesFile": "./google-services.json",
+      "permissions": ["android.permission.SCHEDULE_EXACT_ALARM"]
     },
     "web": {
       "output": "static",
@@ -39,8 +38,14 @@
       ],
       "expo-sqlite",
       "expo-notifications",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "@react-native-google-signin/google-signin"
     ],
+    "extra": {
+      "firebaseGoogleWebClientId": "877571125639-ki5jo1dmge6pl6krco6it2r6nvj0mfjj.apps.googleusercontent.com"
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

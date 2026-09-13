@@ -1,155 +1,23 @@
 import { runDatabaseOperation } from "@/database/database";
+import { CreateMedicationInput, Medication, MedicationListFilter, UpdateMedicationInput } from "./medication.types";
 
-import {
-  CreateMedicationInput,
-  Medication,
-  UpdateMedicationInput,
-} from "./medication.types";
+type MedicationRow = { id: string; profile_id: string; name: string; dosage: string; instructions: string | null; notes: string | null; is_active: number; archived_at: string | null; created_at: string; updated_at: string; };
+function mapMedicationRow(row: MedicationRow): Medication { return { id: row.id, profileId: row.profile_id, name: row.name, dosage: row.dosage, instructions: row.instructions ?? undefined, notes: row.notes ?? undefined, isActive: row.is_active === 1, archivedAt: row.archived_at ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function requireProfile(profileId: string): void { if (!profileId.trim()) throw new Error("Choose a profile before managing medications."); }
 
-type MedicationRow = {
-  id: string;
-  name: string;
-  dosage: string;
-  instructions: string | null;
-  notes: string | null;
-  is_active: number;
-  created_at: string;
-  updated_at: string;
-};
-
-function mapMedicationRow(row: MedicationRow): Medication {
-  return {
-    id: row.id,
-    name: row.name,
-    dosage: row.dosage,
-    instructions: row.instructions ?? undefined,
-    notes: row.notes ?? undefined,
-    isActive: row.is_active === 1,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+export async function createMedication(profileId: string, input: CreateMedicationInput): Promise<Medication> {
+  requireProfile(profileId); const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; const now = new Date().toISOString();
+  return runDatabaseOperation(async (db) => { await db.runAsync(`INSERT INTO medications (id, profile_id, name, dosage, instructions, notes, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, profileId, input.name, input.dosage, input.instructions ?? null, input.notes ?? null, 1, now, now]); return { id, profileId, name: input.name, dosage: input.dosage, instructions: input.instructions, notes: input.notes, isActive: true, createdAt: now, updatedAt: now }; });
 }
-
-export async function createMedication(
-  input: CreateMedicationInput
-): Promise<Medication> {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const now = new Date().toISOString();
-
-  return runDatabaseOperation(async (db) => {
-    await db.runAsync(
-      `INSERT INTO medications
-      (
-        id,
-        name,
-        dosage,
-        instructions,
-        notes,
-        is_active,
-        created_at,
-        updated_at
-      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      input.name,
-      input.dosage,
-      input.instructions ?? null,
-      input.notes ?? null,
-      1,
-      now,
-      now,
-      ]
-    );
-
-    return {
-      id,
-      name: input.name,
-      dosage: input.dosage,
-      instructions: input.instructions,
-      notes: input.notes,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-  });
+export async function getMedications(profileId: string, filter: MedicationListFilter = "active"): Promise<Medication[]> {
+  requireProfile(profileId); const status = filter === "active" ? "archived_at IS NULL AND is_active = 1" : filter === "paused" ? "archived_at IS NULL AND is_active = 0" : filter === "archived" ? "archived_at IS NOT NULL" : "1 = 1";
+  return runDatabaseOperation(async (db) => (await db.getAllAsync<MedicationRow>(`SELECT * FROM medications WHERE profile_id = ? AND ${status} ORDER BY created_at DESC`, [profileId])).map(mapMedicationRow));
 }
-
-export async function getMedications(): Promise<Medication[]> {
-  return runDatabaseOperation(async (db) => {
-    const rows = await db.getAllAsync<MedicationRow>(
-      `SELECT *
-     FROM medications
-     ORDER BY created_at DESC`
-    );
-
-    return rows.map(mapMedicationRow);
-  });
+export async function getMedicationById(profileIdOrId: string, id?: string): Promise<Medication | null> { const profileId = id ? profileIdOrId : null; const medicationId = id ?? profileIdOrId; if (profileId) requireProfile(profileId); return runDatabaseOperation(async (db) => { const row = await db.getFirstAsync<MedicationRow>(`SELECT * FROM medications WHERE id = ?${profileId ? " AND profile_id = ?" : ""}`, profileId ? [medicationId, profileId] : [medicationId]); return row ? mapMedicationRow(row) : null; }); }
+export async function updateMedication(profileId: string, id: string, input: UpdateMedicationInput): Promise<void> {
+  const existing = await getMedicationById(profileId, id); if (!existing) throw new Error("Medication not found."); const now = new Date().toISOString();
+  await runDatabaseOperation(async (db) => { const result = await db.runAsync(`UPDATE medications SET name=?, dosage=?, instructions=?, notes=?, is_active=?, updated_at=? WHERE id=? AND profile_id=?`, [input.name ?? existing.name, input.dosage ?? existing.dosage, input.instructions ?? existing.instructions ?? null, input.notes ?? existing.notes ?? null, (input.isActive ?? existing.isActive) ? 1 : 0, now, id, profileId]); if (result.changes !== 1) throw new Error("Medication not found."); });
 }
-
-export async function getMedicationById(
-  id: string
-): Promise<Medication | null> {
-  return runDatabaseOperation(async (db) => {
-    const row = await db.getFirstAsync<MedicationRow>(
-      `SELECT *
-     FROM medications
-     WHERE id = ?`,
-      [id]
-    );
-
-    return row ? mapMedicationRow(row) : null;
-  });
-}
-
-export async function updateMedication(
-  id: string,
-  input: UpdateMedicationInput
-): Promise<void> {
-  await runDatabaseOperation(async (db) => {
-    const row = await db.getFirstAsync<MedicationRow>(
-      `SELECT *
-       FROM medications
-       WHERE id = ?`,
-      [id],
-    );
-
-    if (!row) {
-      throw new Error("Medication not found.");
-    }
-
-    const existing = mapMedicationRow(row);
-    const updatedAt = new Date().toISOString();
-
-    await db.runAsync(
-      `UPDATE medications
-     SET
-       name = ?,
-       dosage = ?,
-       instructions = ?,
-       notes = ?,
-       is_active = ?,
-       updated_at = ?
-     WHERE id = ?`,
-      [
-        input.name ?? existing.name,
-        input.dosage ?? existing.dosage,
-        input.instructions ?? existing.instructions ?? null,
-        input.notes ?? existing.notes ?? null,
-        (input.isActive ?? existing.isActive) ? 1 : 0,
-        updatedAt,
-        id,
-      ]
-    );
-  });
-}
-
-export async function deleteMedication(id: string): Promise<void> {
-  await runDatabaseOperation(async (db) => {
-    await db.runAsync(
-      `DELETE FROM medications
-     WHERE id = ?`,
-      [id]
-    );
-  });
-}
+export async function archiveMedication(profileId: string, id: string): Promise<void> { await updateMedication(profileId, id, { isActive: false }); await runDatabaseOperation(async (db) => { await db.runAsync(`UPDATE medications SET archived_at=?, updated_at=? WHERE id=? AND profile_id=?`, [new Date().toISOString(), new Date().toISOString(), id, profileId]); }); }
+export async function restoreMedication(profileId: string, id: string): Promise<void> { requireProfile(profileId); await runDatabaseOperation(async (db) => { const result = await db.runAsync(`UPDATE medications SET is_active=1, archived_at=NULL, updated_at=? WHERE id=? AND profile_id=?`, [new Date().toISOString(), id, profileId]); if (result.changes !== 1) throw new Error("Medication not found."); }); }
+export async function deleteMedication(profileId: string, id: string): Promise<void> { requireProfile(profileId); await runDatabaseOperation(async (db) => { const result = await db.runAsync(`DELETE FROM medications WHERE id=? AND profile_id=?`, [id, profileId]); if (result.changes !== 1) throw new Error("Medication not found."); }); }

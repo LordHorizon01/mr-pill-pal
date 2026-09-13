@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import DateTimePicker, {
   DateTimePickerChangeEvent,
@@ -17,7 +17,12 @@ import { useLocalSearchParams } from "expo-router";
 import { scheduleTestNotification } from "@/notifications/notification.service";
 import { useSchedules } from "@/hooks/useSchedules";
 import { useSettingsStore } from "@/state/settings.store";
-import type { ReminderStatus } from "@/features/schedules/schedule.types";
+import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
+import { AppColorTokens, ui } from "@/components/ui-tokens";
+import { useAppTheme } from "@/components/app-theme-provider";
+import { BadgeTone, StatusBadge } from "@/components/themed-ui";
+import { hasScheduleChanges } from "@/features/schedules/schedule-edit.domain";
+import type { MedicationSchedule, ReminderStatus } from "@/features/schedules/schedule.types";
 
 const WEEK_DAYS = [
   { label: "Sun", value: 0 },
@@ -67,6 +72,14 @@ function getScheduleStatusInfo(
   }
 }
 
+function getScheduleStatusTone(reminderStatus: ReminderStatus): BadgeTone {
+  if (reminderStatus === "active") return "active";
+  if (reminderStatus === "paused") return "paused";
+  if (reminderStatus === "expired") return "expired";
+  if (reminderStatus === "permission_required") return "pending";
+  return "missed";
+}
+
 function getScheduleDescription(schedule: {
   type: ScheduleMode;
   startDate: string;
@@ -91,7 +104,25 @@ function getScheduleDescription(schedule: {
     : "Repeating";
 }
 
+function localDateFromString(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+function timeFromString(value: string): Date {
+  const [hours, minutes] = value.split(":").map(Number);
+  const result = new Date();
+  result.setHours(hours, minutes, 0, 0);
+  return result;
+}
+
+function getScheduleSummary(schedule: Pick<MedicationSchedule, "type" | "time" | "startDate" | "repeatDays">): string {
+  return `${getScheduleDescription(schedule)} at ${format(timeFromString(schedule.time), "h:mm a")}`;
+}
+
 export default function ScheduleScreen() {
+  const { colors } = useAppTheme();
+  const styles = createStyles(colors);
   const { medicationId, medicationName } =
     useLocalSearchParams<{
       medicationId: string;
@@ -106,6 +137,7 @@ export default function ScheduleScreen() {
     createSchedule,
     pauseSchedule,
     resumeSchedule,
+    updateSchedule,
     deleteSchedule,
     clearError,
   } = useSchedules();
@@ -137,6 +169,8 @@ export default function ScheduleScreen() {
   const [testNotificationFailed, setTestNotificationFailed] = useState(false);
   const [privacyMessage, setPrivacyMessage] = useState<string | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<MedicationSchedule | null>(null);
   const isSavingRef = useRef(false);
   const isTestingNotificationRef = useRef(false);
   const isChangingPrivacyRef = useRef(false);
@@ -156,6 +190,11 @@ export default function ScheduleScreen() {
 
   const isEveryDaySelected =
     selectedDays.length === 7;
+  const editValuesChanged = useMemo(() => editingSchedule ? hasScheduleChanges(editingSchedule, {
+    time: format(selectedTime, "HH:mm"),
+    startDate: format(selectedDate, "yyyy-MM-dd"),
+    repeatDays: editingSchedule.type === "recurring" ? selectedDays : undefined,
+  }) : true, [editingSchedule, selectedDate, selectedDays, selectedTime]);
 
   useEffect(() => {
     if (medicationId) {
@@ -214,6 +253,28 @@ export default function ScheduleScreen() {
     ]);
   }
 
+  function resetForm() {
+    const time = new Date();
+    time.setHours(9, 0, 0, 0);
+    setEditingSchedule(null);
+    setScheduleMode("recurring");
+    setSelectedTime(time);
+    setSelectedDate(new Date());
+    setSelectedDays([0, 1, 2, 3, 4, 5, 6]);
+    setFormMessage(null);
+  }
+
+  function beginEditing(schedule: MedicationSchedule) {
+    if (schedule.reminderStatus === "expired") return;
+    setEditingSchedule(schedule);
+    setScheduleMode(schedule.type);
+    setSelectedTime(timeFromString(schedule.time));
+    setSelectedDate(localDateFromString(schedule.startDate));
+    setSelectedDays(schedule.repeatDays ?? [0, 1, 2, 3, 4, 5, 6]);
+    setFormMessage(null);
+    setSuccessMessage(null);
+  }
+
   function handleDateValueChange(
     _event: DateTimePickerChangeEvent,
     date?: Date,
@@ -247,7 +308,7 @@ export default function ScheduleScreen() {
     return reminderDate.getTime() <= Date.now();
   }
 
-  async function handleCreateSchedule() {
+  async function handleSaveSchedule() {
     if (!medicationId || isSavingRef.current) {
       return;
     }
@@ -264,6 +325,17 @@ export default function ScheduleScreen() {
       setIsSaving(true);
       setFormMessage(null);
 
+      if (editingSchedule) {
+        await updateSchedule(editingSchedule.id, {
+          time: format(selectedTime, "HH:mm"),
+          startDate: format(selectedDate, "yyyy-MM-dd"),
+          repeatDays: editingSchedule.type === "recurring" ? selectedDays : undefined,
+        });
+        setSuccessMessage("Schedule updated.");
+        resetForm();
+        return;
+      }
+
       if (scheduleMode === "one_time") {
         await createSchedule({
           medicationId,
@@ -279,17 +351,41 @@ export default function ScheduleScreen() {
         medicationId,
         type: "recurring",
         time: format(selectedTime, "HH:mm"),
-        startDate: format(
-          new Date(),
-          "yyyy-MM-dd"
-        ),
+        startDate: format(selectedDate, "yyyy-MM-dd"),
         repeatDays: selectedDays,
       });
+      setSuccessMessage("Schedule added.");
     } catch {
       // Store already contains the error.
     } finally {
       releaseCreateScheduleLock();
     }
+  }
+
+  function requestSaveSchedule() {
+    if (scheduleMode === "one_time" && isSelectedOneTimeInThePast()) {
+      setFormMessage(
+        "Choose a time later than now, or choose a future date for this one-time reminder.",
+      );
+      return;
+    }
+
+    if (!editingSchedule) {
+      void handleSaveSchedule();
+      return;
+    }
+
+    if (!editValuesChanged) return;
+    const nextSchedule = {
+      ...editingSchedule,
+      time: format(selectedTime, "HH:mm"),
+      startDate: format(selectedDate, "yyyy-MM-dd"),
+      repeatDays: editingSchedule.type === "recurring" ? selectedDays : undefined,
+    };
+    Alert.alert("Save schedule changes?", `Current:\n${getScheduleSummary(editingSchedule)}\n\nNew:\n${getScheduleSummary(nextSchedule)}`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Save Changes", onPress: () => void handleSaveSchedule() },
+    ]);
   }
 
   async function handleTestNotification() {
@@ -384,12 +480,14 @@ export default function ScheduleScreen() {
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.title}>
-        Medication Schedule
+        {editingSchedule ? "Edit Schedule" : "Medication Schedule"}
       </Text>
 
       <Text style={styles.medicationName}>
         {medicationName ?? "Medication"}
       </Text>
+
+      <AutoDismissNotice message={successMessage} onDismiss={() => setSuccessMessage(null)} />
 
       {error ? (
         <Pressable
@@ -444,7 +542,9 @@ export default function ScheduleScreen() {
           accessibilityState={{
             selected:
               scheduleMode === "one_time",
+            disabled: Boolean(editingSchedule),
           }}
+          disabled={Boolean(editingSchedule)}
           onPress={() =>
             setScheduleMode("one_time")
           }
@@ -452,6 +552,7 @@ export default function ScheduleScreen() {
             styles.modeButton,
             scheduleMode === "one_time" &&
               styles.modeButtonSelected,
+            editingSchedule && styles.buttonDisabled,
           ]}
         >
           <Text
@@ -472,7 +573,9 @@ export default function ScheduleScreen() {
           accessibilityState={{
             selected:
               scheduleMode === "recurring",
+            disabled: Boolean(editingSchedule),
           }}
+          disabled={Boolean(editingSchedule)}
           onPress={() =>
             setScheduleMode("recurring")
           }
@@ -480,6 +583,7 @@ export default function ScheduleScreen() {
             styles.modeButton,
             scheduleMode === "recurring" &&
               styles.modeButtonSelected,
+            editingSchedule && styles.buttonDisabled,
           ]}
         >
           <Text
@@ -494,13 +598,9 @@ export default function ScheduleScreen() {
         </Pressable>
       </View>
 
-      {/* One-time date */}
-
-      {scheduleMode === "one_time" ? (
-        <>
-          <Text style={styles.label}>
-            Reminder date
-          </Text>
+      <Text style={styles.label}>
+        {scheduleMode === "one_time" ? "Reminder date" : "Start date"}
+      </Text>
 
           <Pressable
             accessibilityRole="button"
@@ -522,13 +622,11 @@ export default function ScheduleScreen() {
             <DateTimePicker
               value={selectedDate}
               mode="date"
-              minimumDate={new Date()}
+              minimumDate={scheduleMode === "one_time" ? new Date() : undefined}
               onValueChange={handleDateValueChange}
               onDismiss={() => setShowDatePicker(false)}
             />
           ) : null}
-        </>
-      ) : null}
 
       {/* Recurring weekdays */}
 
@@ -635,28 +733,30 @@ export default function ScheduleScreen() {
         />
       ) : null}
 
+      <View style={styles.formActionRow}>
+      {editingSchedule ? <Pressable accessibilityRole="button" accessibilityLabel="Cancel schedule editing" disabled={isSaving} onPress={resetForm} style={styles.cancelButton}><Text style={styles.cancelButtonText}>Cancel</Text></Pressable> : null}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={
-          scheduleMode === "one_time"
-            ? "Add one-time schedule"
-            : "Add repeating schedule"
-        }
-        accessibilityState={{ disabled: isSaving, busy: isSaving }}
-        disabled={isSaving}
-        onPress={handleCreateSchedule}
-        style={styles.primaryButton}
+        accessibilityLabel={editingSchedule ? "Save schedule changes" : scheduleMode === "one_time" ? "Add one-time schedule" : "Add repeating schedule"}
+        accessibilityState={{ disabled: isSaving || Boolean(editingSchedule && !editValuesChanged), busy: isSaving }}
+        disabled={isSaving || Boolean(editingSchedule && !editValuesChanged)}
+        onPress={requestSaveSchedule}
+        style={[styles.primaryButton, Boolean(editingSchedule && !editValuesChanged) && styles.buttonDisabled]}
       >
         <Text
           style={styles.primaryButtonText}
         >
           {isSaving
             ? "Saving..."
+            : editingSchedule
+              ? "Save Changes"
             : scheduleMode === "one_time"
               ? "Add One-Time Schedule"
               : "Add Repeating Schedule"}
         </Text>
       </Pressable>
+      </View>
+      {editingSchedule && !editValuesChanged ? <Text style={styles.noChanges}>No changes to save.</Text> : null}
 
       <Pressable
         accessibilityRole="button"
@@ -682,7 +782,7 @@ export default function ScheduleScreen() {
             testNotificationFailed && styles.feedbackBoxError,
           ]}
         >
-          <Text accessibilityLiveRegion="polite" style={styles.feedbackText}>
+          <Text accessibilityLiveRegion="polite" style={[styles.feedbackText, testNotificationFailed && styles.feedbackTextError]}>
             {testNotificationMessage}
           </Text>
           <Text style={styles.errorHint}>Tap to dismiss</Text>
@@ -750,9 +850,7 @@ export default function ScheduleScreen() {
                 {schedule.time}
               </Text>
 
-              <Text accessibilityLiveRegion="polite">
-                {statusInfo.label}
-              </Text>
+              <StatusBadge label={statusInfo.label} tone={getScheduleStatusTone(schedule.reminderStatus)} />
 
               {statusInfo.description ? (
                 <Text style={styles.statusDescription}>
@@ -770,6 +868,12 @@ export default function ScheduleScreen() {
             </View>
 
             <View style={styles.actions}>
+              {schedule.reminderStatus !== "expired" ? <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${schedule.time} reminder`}
+                onPress={() => beginEditing(schedule)}
+                style={styles.actionButton}
+              ><Text style={styles.actionButtonText}>Edit</Text></Pressable> : null}
               {statusInfo.action ? (
                 <Pressable
                   accessibilityRole="button"
@@ -777,7 +881,7 @@ export default function ScheduleScreen() {
                   onPress={() => void handlePauseOrResumeSchedule(schedule)}
                   style={styles.actionButton}
                 >
-                  <Text>{statusInfo.action}</Text>
+                  <Text style={styles.actionButtonText}>{statusInfo.action}</Text>
                 </Pressable>
               ) : null}
 
@@ -787,7 +891,7 @@ export default function ScheduleScreen() {
                 onPress={() => handleDeleteSchedule(schedule)}
                 style={styles.actionButton}
               >
-                <Text>Delete</Text>
+                <Text style={styles.deleteActionText}>Delete</Text>
               </Pressable>
             </View>
             </View>
@@ -798,10 +902,10 @@ export default function ScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
 
   contentContainer: {
@@ -813,12 +917,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "700",
+    color: colors.textPrimary,
   },
 
   medicationName: {
     marginTop: 6,
     marginBottom: 24,
     fontSize: 18,
+    color: colors.textSecondary,
   },
 
   label: {
@@ -834,29 +940,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  modeButton: {
-    flex: 1,
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: "#B8B8B8",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  modeButtonSelected: {
-    backgroundColor: "#222222",
-    borderColor: "#222222",
-  },
-
-  modeButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
-
-  modeButtonTextSelected: {
-    color: "#FFFFFF",
-  },
+  modeButton: { flex: 1, minHeight: ui.touch.minimum, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, alignItems: "center", justifyContent: "center", backgroundColor: colors.inputBackground },
+  modeButtonSelected: { backgroundColor: colors.selectedBackground, borderColor: colors.selectedBackground },
+  modeButtonText: { fontSize: 15, fontWeight: "600", color: colors.inputForeground },
+  modeButtonTextSelected: { color: colors.selectedForeground },
 
   daysContainer: {
     flexDirection: "row",
@@ -865,211 +952,84 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  dayButton: {
-    minWidth: 44,
-    minHeight: 48,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: "#B8B8B8",
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  dayButton: { minWidth: 44, minHeight: ui.touch.minimum, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.inputBackground },
+  dayButtonSelected: { backgroundColor: colors.selectedBackground, borderColor: colors.selectedBackground },
+  dayButtonText: { fontSize: 13, fontWeight: "600", color: colors.inputForeground },
+  dayButtonTextSelected: { color: colors.selectedForeground },
 
-  dayButtonSelected: {
-    backgroundColor: "#222222",
-    borderColor: "#222222",
-  },
+  everyDayButton: { minHeight: ui.touch.minimum, marginBottom: 12, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, backgroundColor: colors.inputBackground },
+  everyDayButtonSelected: { backgroundColor: colors.selectedBackground },
+  everyDayButtonText: { fontSize: 14, fontWeight: "600", color: colors.inputForeground },
+  everyDayButtonTextSelected: { color: colors.selectedForeground },
 
-  dayButtonText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
+  pickerButton: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, paddingHorizontal: 16, backgroundColor: colors.inputBackground },
+  pickerValue: { fontSize: 17, fontWeight: "600", color: colors.inputForeground },
+  pickerHint: { fontSize: 14, color: colors.textMuted },
 
-  dayButtonTextSelected: {
-    color: "#FFFFFF",
-  },
-
-  everyDayButton: {
-    minHeight: 48,
-    marginBottom: 12,
-    alignSelf: "flex-start",
-    justifyContent: "center",
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: "#222222",
-    borderRadius: 10,
-  },
-
-  everyDayButtonSelected: {
-    backgroundColor: "#222222",
-  },
-
-  everyDayButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  everyDayButtonTextSelected: {
-    color: "#FFFFFF",
-  },
-
-  pickerButton: {
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#B8B8B8",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-  },
-
-  pickerValue: {
-    fontSize: 17,
-    fontWeight: "600",
-  },
-
-  pickerHint: {
-    fontSize: 14,
-    color: "#4E5D6A",
-  },
-
-  primaryButton: {
-    minHeight: 52,
-    marginTop: 12,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#222222",
-  },
+  primaryButton: { flex: 1, minHeight: 52, marginTop: 12, borderRadius: ui.radius.button, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryBackground },
 
   primaryButtonText: {
-    color: "#FFFFFF",
+    color: colors.primaryForeground,
     fontSize: 16,
     fontWeight: "600",
   },
 
-  testButton: {
-    minHeight: 52,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "#222222",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
+  testButton: { minHeight: 52, marginTop: 12, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, alignItems: "center", justifyContent: "center", backgroundColor: colors.inputBackground },
+  testButtonText: { fontSize: 16, fontWeight: "600", color: colors.outlineForeground },
+
+  formActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
   },
 
-  testButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
+  cancelButton: { minHeight: 52, marginTop: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: 18, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, backgroundColor: colors.inputBackground },
+  cancelButtonText: { color: colors.outlineForeground, fontSize: 16, fontWeight: "700" },
+  noChanges: { marginTop: 7, color: colors.textMuted, fontSize: 14 },
+
+  buttonDisabled: {
+    opacity: 0.45,
   },
 
-  feedbackBox: {
-    marginTop: 12,
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: "#EAF7EF",
-  },
+  feedbackBox: { marginTop: 12, padding: 14, borderRadius: ui.radius.button, backgroundColor: colors.badgeTakenBackground },
+  feedbackBoxError: { backgroundColor: colors.dangerBackground },
+  feedbackText: { fontSize: 15, fontWeight: "600", color: colors.badgeTakenForeground },
+  feedbackTextError: { color: colors.dangerForeground },
 
-  feedbackBoxError: {
-    backgroundColor: "#FDECEC",
-  },
+  privacyButton: { minHeight: 72, padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.button, backgroundColor: colors.cardBackground },
+  privacyButtonEnabled: { borderColor: colors.badgeTakenForeground, backgroundColor: colors.badgeTakenBackground },
+  privacyTitle: { fontSize: 16, fontWeight: "700", color: colors.cardForeground },
+  privacyDescription: { marginTop: 5, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
+  privacyMessage: { marginTop: 8, fontSize: 14, lineHeight: 20, color: colors.textMuted },
 
-  feedbackText: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
+  sectionTitle: { marginTop: 30, marginBottom: 12, fontSize: 20, fontWeight: "700", color: colors.textPrimary },
+  emptyText: { fontSize: 15, color: colors.textSecondary },
+  errorBox: { marginBottom: 16, padding: 14, borderRadius: ui.radius.button, backgroundColor: colors.dangerBackground },
+  errorHint: { marginTop: 4, fontSize: 13, color: colors.textMuted },
 
-  privacyButton: {
-    minHeight: 72,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#B8B8B8",
-    borderRadius: 12,
-  },
-
-  privacyButtonEnabled: {
-    borderColor: "#176B3A",
-    backgroundColor: "#EAF7EF",
-  },
-
-  privacyTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  privacyDescription: {
-    marginTop: 5,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-
-  privacyMessage: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-
-  sectionTitle: {
-    marginTop: 30,
-    marginBottom: 12,
-    fontSize: 20,
-    fontWeight: "700",
-  },
-
-  emptyText: {
-    fontSize: 15,
-  },
-
-  errorBox: {
-    marginBottom: 16,
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: "#FDECEC",
-  },
-
-  errorHint: {
-    marginTop: 4,
-    fontSize: 13,
-  },
-
-  scheduleCard: {
-    borderWidth: 1,
-    borderColor: "#DDDDDD",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-  },
+  scheduleCard: { borderWidth: 1, borderColor: colors.border, borderTopColor: colors.borderStrong, borderRadius: ui.radius.card, padding: 16, marginBottom: 12, backgroundColor: colors.cardBackground },
 
   scheduleInformation: {
     gap: 4,
   },
 
-  scheduleTime: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
-
-  repeatText: {
-    fontSize: 14,
-  },
+  scheduleTime: { fontSize: 22, fontWeight: "700", color: colors.cardForeground },
+  repeatText: { fontSize: 14, color: colors.textSecondary },
 
   statusDescription: {
     fontSize: 13,
     lineHeight: 18,
-    color: "#4E5D6A",
+    color: colors.textMuted,
   },
 
   actions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
     marginTop: 12,
   },
 
-  actionButton: {
-    minHeight: 48,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
+  actionButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 12, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, backgroundColor: colors.inputBackground },
+  actionButtonText: { fontWeight: "700", color: colors.outlineForeground },
+  deleteActionText: { fontWeight: "700", color: colors.dangerForeground },
 });

@@ -29,6 +29,10 @@ export function useSchedules() {
     (state) => state.resumeSchedule
   );
 
+  const updateSchedule = useScheduleStore(
+    (state) => state.updateSchedule
+  );
+
   const deleteSchedule = useScheduleStore(
     (state) => state.deleteSchedule
   );
@@ -49,6 +53,7 @@ export function useSchedules() {
     createSchedule,
     pauseSchedule,
     resumeSchedule,
+    updateSchedule,
     deleteSchedule,
     clearSchedules,
     clearError,
