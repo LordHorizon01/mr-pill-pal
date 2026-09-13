@@ -32,6 +32,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+google-services.json
+GoogleService-Info.plist
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +43,14 @@ example
 # generated native folders
 /ios
 /android
+
+# Local build, report, and test artifacts - keep these out of checkpoint commits.
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+build/
+output/
+tmp/
+.metro/
+service-account*.json

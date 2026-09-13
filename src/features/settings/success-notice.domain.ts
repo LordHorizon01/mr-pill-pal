@@ -1,0 +1,1 @@
+export const SUCCESS_NOTICE_DURATION_MS = 2800;

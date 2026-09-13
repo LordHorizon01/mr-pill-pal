@@ -4,9 +4,15 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~57.0.16",
+    "@react-native-community/datetimepicker": "9.1.0",
+    "@react-native-firebase/app": "^26.4.0",
+    "@react-native-firebase/auth": "^26.4.0",
+    "@react-native-firebase/firestore": "^26.4.0",
+    "@react-native-google-signin/google-signin": "^16.1.5",
     "date-fns": "^4.4.0",
     "expo": "~57.0.20",
     "expo-constants": "~57.0.17",
+    "expo-dev-client": "~57.0.18",
     "expo-device": "~57.0.1",
     "expo-font": "~57.0.3",
     "expo-glass-effect": "~57.0.1",
@@ -39,10 +45,11 @@
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:doses": "tsc --ignoreConfig tests/dose.domain.test.ts tests/dose.schema.test.ts tests/history.domain.test.ts tests/medication-insights.domain.test.ts tests/navigation-history-accordion.domain.test.ts tests/history-count-accordion.domain.test.ts tests/schedule-settings-foundation.domain.test.ts tests/auth-profile.domain.test.ts tests/auth-navigation.domain.test.ts tests/auth-account-switch.domain.test.ts tests/profile-setup.domain.test.ts tests/profile-cloud.repository.test.ts tests/appearance-profile.domain.test.ts tests/theme-contrast.domain.test.ts tests/async-request.domain.test.ts src/features/doses/dose.domain.ts src/features/doses/dose.types.ts src/features/schedules/schedule.types.ts src/features/schedules/schedule-edit.domain.ts src/features/settings/reminder-health.domain.ts src/features/settings/success-notice.domain.ts src/features/history/history.domain.ts src/features/history/history.types.ts src/features/history/insights.domain.ts src/features/history/history-accordion.domain.ts src/features/navigation/navigation.domain.ts src/features/medications/medication.types.ts src/features/medications/medication.domain.ts src/features/auth/auth.domain.ts src/features/auth/auth-ui.domain.ts src/features/auth/auth-session.domain.ts src/features/profiles/profile.domain.ts src/features/profiles/profile-setup.domain.ts src/features/profiles/profile.types.ts src/components/ui-tokens.ts src/state/async-request.domain.ts src/database/schema/schema.ts --outDir tmp/dose-test-build --module commonjs --target es2022 --esModuleInterop --skipLibCheck --types node && node --test tmp/dose-test-build/tests/dose.domain.test.js tmp/dose-test-build/tests/dose.schema.test.js tmp/dose-test-build/tests/history.domain.test.js tmp/dose-test-build/tests/medication-insights.domain.test.js tmp/dose-test-build/tests/navigation-history-accordion.domain.test.js tmp/dose-test-build/tests/history-count-accordion.domain.test.js tmp/dose-test-build/tests/auth-profile.domain.test.js tmp/dose-test-build/tests/auth-navigation.domain.test.js tmp/dose-test-build/tests/auth-account-switch.domain.test.js tmp/dose-test-build/tests/profile-setup.domain.test.js tmp/dose-test-build/tests/profile-cloud.repository.test.js tmp/dose-test-build/tests/appearance-profile.domain.test.js tmp/dose-test-build/tests/theme-contrast.domain.test.js tmp/dose-test-build/tests/async-request.domain.test.js tmp/dose-test-build/tests/schedule-settings-foundation.domain.test.js"
   },
   "private": true
 }
