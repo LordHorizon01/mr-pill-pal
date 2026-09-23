@@ -1,5 +1,6 @@
 import { getActiveSchedulesByProfile } from "@/features/schedules/schedule.repository";
 import { getMedicationById } from "@/features/medications/medication.repository";
+import { refreshReminderForDoseStatus } from "@/features/schedules/reminder-lifecycle.service";
 
 import {
   createDoseOccurrences,
@@ -9,7 +10,9 @@ import {
   markDoseMissedInDatabase,
   markDoseSkippedInDatabase,
   markDoseTakenInDatabase,
+  correctDoseStatusInDatabase,
 } from "./dose.repository";
+import { DoseStatusCorrectionTarget } from "./dose-status-correction.domain";
 import { CreateDoseOccurrenceInput, TodayDose } from "./dose.types";
 import {
   DOSE_EXPIRY_MINUTES,
@@ -71,12 +74,20 @@ export async function markTaken(profileId: string, id: string): Promise<void> {
   validateDoseId(id);
   await validateDoseCanBeRecorded(profileId, id);
   await markDoseTakenInDatabase(profileId, id, new Date().toISOString());
+  await refreshReminderForDoseStatus(profileId, id);
 }
 
 export async function markSkipped(profileId: string, id: string): Promise<void> {
   validateDoseId(id);
   await validateDoseCanBeRecorded(profileId, id);
   await markDoseSkippedInDatabase(profileId, id);
+  await refreshReminderForDoseStatus(profileId, id);
+}
+
+export async function correctDoseStatus(profileId: string, id: string, target: DoseStatusCorrectionTarget): Promise<void> {
+  validateDoseId(id);
+  await correctDoseStatusInDatabase(profileId, id, target);
+  await refreshReminderForDoseStatus(profileId, id);
 }
 
 export async function evaluatePendingDosesForDate(

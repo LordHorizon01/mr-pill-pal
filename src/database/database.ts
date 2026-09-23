@@ -8,11 +8,19 @@ import {
   CREATE_DOSE_OCCURRENCE_UNIQUE_INDEX,
   CREATE_DOSE_RECORDS_TABLE,
   CREATE_MEDICATIONS_TABLE,
+  CREATE_MEDICATION_INVENTORY_PROFILE_INDEX,
+  CREATE_MEDICATION_INVENTORY_TABLE,
   CREATE_MEDICATION_PROFILE_INDEX,
   CREATE_LOCAL_PROFILES_TABLE,
   CREATE_LOCAL_PROFILES_ACCOUNT_INDEX,
   CREATE_SCHEDULES_TABLE,
   CREATE_SCHEDULE_PROFILE_INDEX,
+  CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX,
+  CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX,
+  CREATE_DOSE_INVENTORY_EFFECTS_TABLE,
+  CREATE_INVENTORY_EVENTS_TABLE,
+  CREATE_REMINDER_OCCURRENCES_TABLE,
+  CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX,
 } from "./schema/schema";
 
 const DATABASE_NAME = "mr-pill-pal.db";
@@ -53,6 +61,10 @@ async function initializeDatabaseTables(): Promise<void> {
 
   await db.withExclusiveTransactionAsync(async (transaction) => {
     await transaction.execAsync(CREATE_MEDICATIONS_TABLE);
+    await transaction.execAsync(CREATE_MEDICATION_INVENTORY_TABLE);
+    await transaction.execAsync(CREATE_INVENTORY_EVENTS_TABLE);
+    await transaction.execAsync(CREATE_DOSE_INVENTORY_EFFECTS_TABLE);
+    await transaction.execAsync(CREATE_REMINDER_OCCURRENCES_TABLE);
     await transaction.execAsync(CREATE_SCHEDULES_TABLE);
     await transaction.execAsync(CREATE_DOSE_RECORDS_TABLE);
     await transaction.execAsync(CREATE_APP_SETTINGS_TABLE);
@@ -110,6 +122,15 @@ async function initializeDatabaseTables(): Promise<void> {
       await transaction.execAsync(`ALTER TABLE dose_records ADD COLUMN profile_id TEXT;`);
     }
 
+    if (!doseRecordColumns.some((column) => column.name === "status_recorded_at")) {
+      await transaction.execAsync(`ALTER TABLE dose_records ADD COLUMN status_recorded_at TEXT;`);
+      await transaction.execAsync(`
+        UPDATE dose_records
+        SET status_recorded_at = COALESCE(taken_at, updated_at, created_at)
+        WHERE status IN ('taken', 'skipped', 'missed') AND status_recorded_at IS NULL;
+      `);
+    }
+
     const hasMedicationNameSnapshot = doseRecordColumns.some(
       (column) => column.name === "medication_name",
     );
@@ -159,6 +180,7 @@ async function initializeDatabaseTables(): Promise<void> {
       await transaction.execAsync(`
         INSERT INTO dose_records (
           id,
+          profile_id,
           medication_id,
           schedule_id,
           scheduled_date,
@@ -166,6 +188,7 @@ async function initializeDatabaseTables(): Promise<void> {
           scheduled_at,
           status,
           taken_at,
+          status_recorded_at,
           notes,
           medication_name,
           medication_dosage,
@@ -174,6 +197,7 @@ async function initializeDatabaseTables(): Promise<void> {
         )
         SELECT
           id,
+          profile_id,
           medication_id,
           schedule_id,
           COALESCE(scheduled_date, substr(scheduled_at, 1, 10)),
@@ -187,6 +211,7 @@ async function initializeDatabaseTables(): Promise<void> {
           ),
           status,
           taken_at,
+          status_recorded_at,
           notes,
           ${medicationNameSource},
           ${medicationDosageSource},
@@ -252,6 +277,10 @@ async function initializeDatabaseTables(): Promise<void> {
 
     await transaction.execAsync(CREATE_LOCAL_PROFILES_ACCOUNT_INDEX);
     await transaction.execAsync(CREATE_MEDICATION_PROFILE_INDEX);
+    await transaction.execAsync(CREATE_MEDICATION_INVENTORY_PROFILE_INDEX);
+    await transaction.execAsync(CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX);
+    await transaction.execAsync(CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX);
+    await transaction.execAsync(CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX);
     await transaction.execAsync(CREATE_SCHEDULE_PROFILE_INDEX);
     await transaction.execAsync(CREATE_DOSE_PROFILE_DATE_INDEX);
   });

@@ -13,6 +13,96 @@ export const CREATE_MEDICATIONS_TABLE = `
   );
 `;
 
+/** Optional, one-to-one local inventory configuration for a medication. */
+export const CREATE_MEDICATION_INVENTORY_TABLE = `
+  CREATE TABLE IF NOT EXISTS medication_inventory (
+    medication_id TEXT PRIMARY KEY NOT NULL,
+    profile_id TEXT NOT NULL,
+    tracking_enabled INTEGER NOT NULL DEFAULT 0 CHECK (tracking_enabled IN (0, 1)),
+    current_quantity REAL NOT NULL CHECK (current_quantity >= 0),
+    unit TEXT NOT NULL,
+    consumption_per_taken REAL NOT NULL CHECK (consumption_per_taken > 0),
+    low_stock_threshold REAL NOT NULL CHECK (low_stock_threshold >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (medication_id)
+      REFERENCES medications(id)
+      ON DELETE CASCADE
+  );
+`;
+
+/**
+ * Local audit trail for inventory changes. Cycle 02 writes exactly one
+ * dose_consumption event for a successfully recorded Taken dose.
+ */
+export const CREATE_INVENTORY_EVENTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS inventory_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    profile_id TEXT NOT NULL,
+    medication_id TEXT NOT NULL,
+    dose_id TEXT,
+    event_type TEXT NOT NULL,
+    quantity_delta REAL NOT NULL,
+    quantity_before REAL NOT NULL,
+    quantity_after REAL NOT NULL,
+    created_at TEXT NOT NULL
+  );
+`;
+
+export const CREATE_MEDICATION_INVENTORY_PROFILE_INDEX = `
+  CREATE INDEX IF NOT EXISTS medication_inventory_by_profile
+  ON medication_inventory (profile_id, tracking_enabled, medication_id);
+`;
+
+export const CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX = `
+  CREATE UNIQUE INDEX IF NOT EXISTS inventory_events_dose_consumption_unique
+  ON inventory_events (dose_id)
+  WHERE dose_id IS NOT NULL AND event_type = 'dose_consumption';
+`;
+
+/**
+ * The current stock effect of a dose. Inventory events remain the audit trail;
+ * this row makes a Taken <-> Skipped correction safe even after configuration
+ * values have changed.
+ */
+export const CREATE_DOSE_INVENTORY_EFFECTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS dose_inventory_effects (
+    dose_id TEXT PRIMARY KEY NOT NULL,
+    profile_id TEXT NOT NULL,
+    medication_id TEXT NOT NULL,
+    is_applied INTEGER NOT NULL CHECK (is_applied IN (0, 1)),
+    applied_quantity REAL NOT NULL CHECK (applied_quantity >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+export const CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX = `
+  CREATE INDEX IF NOT EXISTS dose_inventory_effects_by_profile
+  ON dose_inventory_effects (profile_id, medication_id, is_applied);
+`;
+
+export const CREATE_REMINDER_OCCURRENCES_TABLE = `
+  CREATE TABLE IF NOT EXISTS scheduled_reminder_occurrences (
+    id TEXT PRIMARY KEY NOT NULL,
+    profile_id TEXT NOT NULL,
+    medication_id TEXT NOT NULL,
+    schedule_id TEXT NOT NULL,
+    scheduled_date TEXT NOT NULL,
+    scheduled_time TEXT NOT NULL,
+    native_notification_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('scheduled', 'cancelled', 'cleanup_failed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (schedule_id, scheduled_date, scheduled_time)
+  );
+`;
+
+export const CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX = `
+  CREATE INDEX IF NOT EXISTS reminder_occurrences_by_profile_and_schedule
+  ON scheduled_reminder_occurrences (profile_id, schedule_id, scheduled_date, status);
+`;
+
 export const CREATE_SCHEDULES_TABLE = `
   CREATE TABLE IF NOT EXISTS schedules (
     id TEXT PRIMARY KEY NOT NULL,
@@ -46,6 +136,7 @@ export const CREATE_DOSE_RECORDS_TABLE = `
     scheduled_at TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'taken', 'skipped', 'missed')),
     taken_at TEXT,
+    status_recorded_at TEXT,
     notes TEXT,
     medication_name TEXT,
     medication_dosage TEXT,

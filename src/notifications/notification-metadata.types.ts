@@ -3,4 +3,6 @@ export interface ReminderNotificationMetadata {
   medicationId: string;
   scheduleId: string;
   doseId?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
 }

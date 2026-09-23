@@ -221,6 +221,7 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
     <AppDrawerProvider><Stack screenOptions={{ headerStyle: { backgroundColor: colors.background }, headerTintColor: colors.primary, headerTitleStyle: { fontSize: 20, fontWeight: "700", color: colors.text }, headerShadowVisible: true }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
+      <Stack.Screen name="refill-settings" options={{ title: "Refill tracking" }} />
       <Stack.Screen name="dose-detail" options={{ title: "Dose details" }} />
       <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />
