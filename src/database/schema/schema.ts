@@ -41,10 +41,12 @@ export const CREATE_INVENTORY_EVENTS_TABLE = `
     profile_id TEXT NOT NULL,
     medication_id TEXT NOT NULL,
     dose_id TEXT,
+    operation_id TEXT,
     event_type TEXT NOT NULL,
     quantity_delta REAL NOT NULL,
     quantity_before REAL NOT NULL,
     quantity_after REAL NOT NULL,
+    unit_snapshot TEXT,
     created_at TEXT NOT NULL
   );
 `;
@@ -58,6 +60,41 @@ export const CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX = `
   CREATE UNIQUE INDEX IF NOT EXISTS inventory_events_dose_consumption_unique
   ON inventory_events (dose_id)
   WHERE dose_id IS NOT NULL AND event_type = 'dose_consumption';
+`;
+
+/** History is profile-scoped and newest-first for one medication. */
+export const CREATE_INVENTORY_EVENTS_HISTORY_INDEX = `
+  CREATE INDEX IF NOT EXISTS inventory_events_by_profile_medication_created
+  ON inventory_events (profile_id, medication_id, created_at DESC, id DESC);
+`;
+
+/** A retry of the same Record refill submission must never add stock twice. */
+export const CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX = `
+  CREATE UNIQUE INDEX IF NOT EXISTS inventory_events_refill_operation_unique
+  ON inventory_events (profile_id, medication_id, operation_id)
+  WHERE operation_id IS NOT NULL AND event_type = 'refill_addition';
+`;
+
+/** Durable low-stock episode state. Native notification IDs are derived device state. */
+export const CREATE_REFILL_ALERT_STATES_TABLE = `
+  CREATE TABLE IF NOT EXISTS refill_alert_states (
+    profile_id TEXT NOT NULL,
+    medication_id TEXT NOT NULL,
+    episode_active INTEGER NOT NULL DEFAULT 0 CHECK (episode_active IN (0, 1)),
+    alert_status TEXT NOT NULL DEFAULT 'normal' CHECK (alert_status IN ('normal', 'pending', 'alerted', 'permission_required', 'scheduling_failed', 'inactive')),
+    native_notification_id TEXT,
+    attempted_at TEXT,
+    alerted_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, medication_id),
+    FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE CASCADE
+  );
+`;
+
+export const CREATE_REFILL_ALERT_STATES_ACCOUNT_INDEX = `
+  CREATE INDEX IF NOT EXISTS refill_alert_states_by_profile_and_status
+  ON refill_alert_states (profile_id, episode_active, alert_status, medication_id);
 `;
 
 /**

@@ -13,7 +13,7 @@ test("Home greeting uses local morning, afternoon, and evening periods", () => {
 test("Home greeting prefers nickname, falls back to first name, and never shows empty punctuation", () => {
   assert.equal(getProfileGreetingName({ fullName: "  Kshitij   Nigam ", nickname: "  Kshitij  " }), "Kshitij");
   assert.equal(getProfileGreetingName({ fullName: "  Kshitij   Nigam " }), "Kshitij");
-  assert.equal(getHomeGreeting({ fullName: "   " }), "Good evening");
+  assert.equal(getHomeGreeting({ fullName: "   " }, new Date(2026, 8, 13, 18, 0)), "Good evening");
 });
 
 test("appearance resolves system preference and explicit theme choices predictably", () => {

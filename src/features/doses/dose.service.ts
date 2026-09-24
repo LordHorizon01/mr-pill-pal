@@ -1,6 +1,7 @@
 import { getActiveSchedulesByProfile } from "@/features/schedules/schedule.repository";
 import { getMedicationById } from "@/features/medications/medication.repository";
 import { refreshReminderForDoseStatus } from "@/features/schedules/reminder-lifecycle.service";
+import { reconcileLowStockAlert } from "@/features/refills/low-stock-alert.service";
 
 import {
   createDoseOccurrences,
@@ -73,8 +74,10 @@ export async function generateDoseOccurrencesForDate(
 export async function markTaken(profileId: string, id: string): Promise<void> {
   validateDoseId(id);
   await validateDoseCanBeRecorded(profileId, id);
+  const dose = await getDoseById(profileId, id);
   await markDoseTakenInDatabase(profileId, id, new Date().toISOString());
   await refreshReminderForDoseStatus(profileId, id);
+  if (dose) void reconcileLowStockAlert(profileId, dose.medicationId);
 }
 
 export async function markSkipped(profileId: string, id: string): Promise<void> {
@@ -86,8 +89,10 @@ export async function markSkipped(profileId: string, id: string): Promise<void> 
 
 export async function correctDoseStatus(profileId: string, id: string, target: DoseStatusCorrectionTarget): Promise<void> {
   validateDoseId(id);
+  const dose = await getDoseById(profileId, id);
   await correctDoseStatusInDatabase(profileId, id, target);
   await refreshReminderForDoseStatus(profileId, id);
+  if (dose) void reconcileLowStockAlert(profileId, dose.medicationId);
 }
 
 export async function evaluatePendingDosesForDate(

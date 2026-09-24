@@ -154,6 +154,21 @@ export async function scheduleTestNotification(): Promise<string> {
   }
 }
 
+/** Schedules one immediate, factual inventory alert. Permission is never requested here. */
+export async function scheduleLowStockNotification(content: { title: string; body: string }, profileId: string, medicationId: string): Promise<string> {
+  if (!(await hasNotificationPermission())) {
+    throw new NotificationPermissionError();
+  }
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: { title: content.title, body: content.body, data: { profileId, medicationId, kind: "low_stock" } },
+      trigger: null,
+    });
+  } catch {
+    throw new NativeReminderSchedulingError();
+  }
+}
+
 export async function scheduleDailyMedicationReminder(
   medicationName: string,
   time: string,

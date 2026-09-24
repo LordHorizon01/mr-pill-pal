@@ -16,6 +16,10 @@ import {
   CREATE_SCHEDULES_TABLE,
   CREATE_SCHEDULE_PROFILE_INDEX,
   CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX,
+  CREATE_INVENTORY_EVENTS_HISTORY_INDEX,
+  CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX,
+  CREATE_REFILL_ALERT_STATES_ACCOUNT_INDEX,
+  CREATE_REFILL_ALERT_STATES_TABLE,
   CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX,
   CREATE_DOSE_INVENTORY_EFFECTS_TABLE,
   CREATE_INVENTORY_EVENTS_TABLE,
@@ -63,12 +67,23 @@ async function initializeDatabaseTables(): Promise<void> {
     await transaction.execAsync(CREATE_MEDICATIONS_TABLE);
     await transaction.execAsync(CREATE_MEDICATION_INVENTORY_TABLE);
     await transaction.execAsync(CREATE_INVENTORY_EVENTS_TABLE);
+    await transaction.execAsync(CREATE_REFILL_ALERT_STATES_TABLE);
     await transaction.execAsync(CREATE_DOSE_INVENTORY_EFFECTS_TABLE);
     await transaction.execAsync(CREATE_REMINDER_OCCURRENCES_TABLE);
     await transaction.execAsync(CREATE_SCHEDULES_TABLE);
     await transaction.execAsync(CREATE_DOSE_RECORDS_TABLE);
     await transaction.execAsync(CREATE_APP_SETTINGS_TABLE);
     await transaction.execAsync(CREATE_LOCAL_PROFILES_TABLE);
+
+    const inventoryEventColumns = await transaction.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(inventory_events);`,
+    );
+    if (!inventoryEventColumns.some((column) => column.name === "unit_snapshot")) {
+      await transaction.execAsync(`ALTER TABLE inventory_events ADD COLUMN unit_snapshot TEXT;`);
+    }
+    if (!inventoryEventColumns.some((column) => column.name === "operation_id")) {
+      await transaction.execAsync(`ALTER TABLE inventory_events ADD COLUMN operation_id TEXT;`);
+    }
 
     const medicationColumns = await transaction.getAllAsync<{ name: string }>(
       `PRAGMA table_info(medications);`,
@@ -279,6 +294,9 @@ async function initializeDatabaseTables(): Promise<void> {
     await transaction.execAsync(CREATE_MEDICATION_PROFILE_INDEX);
     await transaction.execAsync(CREATE_MEDICATION_INVENTORY_PROFILE_INDEX);
     await transaction.execAsync(CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX);
+    await transaction.execAsync(CREATE_INVENTORY_EVENTS_HISTORY_INDEX);
+    await transaction.execAsync(CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX);
+    await transaction.execAsync(CREATE_REFILL_ALERT_STATES_ACCOUNT_INDEX);
     await transaction.execAsync(CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX);
     await transaction.execAsync(CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX);
     await transaction.execAsync(CREATE_SCHEDULE_PROFILE_INDEX);
