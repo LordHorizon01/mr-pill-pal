@@ -15,6 +15,7 @@ import {
   CREATE_MEDICATION_INVENTORY_TABLE,
   CREATE_MEDICATIONS_TABLE,
   CREATE_REMINDER_OCCURRENCES_TABLE,
+  CREATE_SCHEDULES_TABLE,
 } from "../src/database/schema/schema";
 
 test("dose schema protects one schedule occurrence at one date and time", () => {
@@ -23,6 +24,11 @@ test("dose schema protects one schedule occurrence at one date and time", () => 
     CREATE_DOSE_OCCURRENCE_UNIQUE_INDEX,
     /schedule_id, scheduled_date, scheduled_time/i,
   );
+});
+
+test("schedule schema persists the intentional effective time used to prevent backfilled occurrences", () => {
+  assert.match(CREATE_SCHEDULES_TABLE, /effective_at TEXT NOT NULL/i);
+  assert.match(CREATE_SCHEDULES_TABLE, /created_at TEXT NOT NULL/i);
 });
 
 test("reminder occurrences are profile-scoped and uniquely identify a schedule date and time", () => {

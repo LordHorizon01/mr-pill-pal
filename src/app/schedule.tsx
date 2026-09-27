@@ -12,7 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { scheduleTestNotification } from "@/notifications/notification.service";
 import { useSchedules } from "@/hooks/useSchedules";
@@ -23,6 +23,7 @@ import { useAppTheme } from "@/components/app-theme-provider";
 import { BadgeTone, StatusBadge } from "@/components/themed-ui";
 import { hasScheduleChanges } from "@/features/schedules/schedule-edit.domain";
 import type { MedicationSchedule, ReminderStatus } from "@/features/schedules/schedule.types";
+import { useProfileStore } from "@/state/profile.store";
 
 const WEEK_DAYS = [
   { label: "Sun", value: 0 },
@@ -123,11 +124,13 @@ function getScheduleSummary(schedule: Pick<MedicationSchedule, "type" | "time" |
 export default function ScheduleScreen() {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const { medicationId, medicationName } =
+  const { medicationId, medicationName, profileId: sourceProfileId } =
     useLocalSearchParams<{
       medicationId: string;
       medicationName?: string;
+      profileId?: string;
     }>();
+  const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
 
   const {
     schedules,
@@ -197,10 +200,10 @@ export default function ScheduleScreen() {
   }) : true, [editingSchedule, selectedDate, selectedDays, selectedTime]);
 
   useEffect(() => {
-    if (medicationId) {
+    if (medicationId && selectedProfileId) {
       loadSchedules(medicationId);
     }
-  }, [medicationId, loadSchedules]);
+  }, [medicationId, loadSchedules, selectedProfileId]);
 
   useEffect(() => {
     void loadSettings();
@@ -468,6 +471,16 @@ export default function ScheduleScreen() {
     } catch {
       // The schedule store shows the error in the screen.
     }
+  }
+
+  if (sourceProfileId && sourceProfileId !== selectedProfileId) {
+    return <View style={[styles.container, styles.contentContainer]}>
+      <Text style={styles.title}>Profile changed</Text>
+      <Text style={styles.emptyText}>This schedule belongs to the profile you left. Return to Medications and choose a medicine for the current profile.</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Return to the previous screen" onPress={() => router.back()} style={styles.actionButton}>
+        <Text style={styles.actionButtonText}>Go back</Text>
+      </Pressable>
+    </View>;
   }
 
   return (

@@ -16,7 +16,7 @@ const defaults = { currentQuantity: "0", unit: "tablets" as StockUnit, consumpti
 const createOperationId = () => `refill-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 export default function RefillSettingsScreen() {
-  const { medicationId } = useLocalSearchParams<{ medicationId?: string }>();
+  const { medicationId, profileId: sourceProfileId } = useLocalSearchParams<{ medicationId?: string; profileId?: string }>();
   const profileId = useProfileStore((state) => state.selectedProfileId);
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -29,31 +29,37 @@ export default function RefillSettingsScreen() {
   const [lowStockThreshold, setLowStockThreshold] = useState(defaults.lowStockThreshold);
   const [quantityAdded, setQuantityAdded] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadedProfileId, setLoadedProfileId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRecordingRefill, setIsRecordingRefill] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recordRefillGuard = useRef(false);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!profileId || !medicationId) { setError("Medication details are unavailable."); setIsLoading(false); return; }
+    const request = ++loadRequestRef.current;
+    setLoadedProfileId(null);
+    if (!profileId || !medicationId || (sourceProfileId && sourceProfileId !== profileId)) { setError("This refill screen belongs to a different profile. Return to Medications and choose a medicine for the current profile."); setIsLoading(false); return; }
     setIsLoading(true); setError(null);
     try {
       const [medication, savedInventory] = await Promise.all([getMedication(profileId, medicationId), getRefillTracking(profileId, medicationId)]);
+      if (request !== loadRequestRef.current) return;
       if (!medication) throw new Error("Medication not found.");
       setMedicationName(medication.name);
       setInventory(savedInventory);
+      setLoadedProfileId(profileId);
       if (savedInventory) {
         setTrackingEnabled(savedInventory.trackingEnabled); setCurrentQuantity(String(savedInventory.currentQuantity)); setUnit(savedInventory.unit);
         setConsumptionPerTaken(String(savedInventory.consumptionPerTaken)); setLowStockThreshold(String(savedInventory.lowStockThreshold));
       }
-    } catch (loadError) { setError(getSafeDatabaseErrorMessage(loadError, "Could not load refill tracking. Please try again.")); }
-    finally { setIsLoading(false); }
-  }, [medicationId, profileId]);
+    } catch (loadError) { if (request === loadRequestRef.current) setError(getSafeDatabaseErrorMessage(loadError, "Could not load refill tracking. Please try again.")); }
+    finally { if (request === loadRequestRef.current) setIsLoading(false); }
+  }, [medicationId, profileId, sourceProfileId]);
 
   useEffect(() => { void load(); }, [load]);
 
   async function save() {
-    if (!profileId || !medicationId) return;
+    if (!profileId || !medicationId || (sourceProfileId && sourceProfileId !== profileId)) return;
     setIsSaving(true); setError(null);
     try {
       await saveRefillTracking(profileId, medicationId, {
@@ -69,7 +75,7 @@ export default function RefillSettingsScreen() {
   }
 
   function requestRecordRefill() {
-    if (!profileId || !medicationId || !inventory || !inventory.trackingEnabled || recordRefillGuard.current) return;
+    if (!profileId || !medicationId || (sourceProfileId && sourceProfileId !== profileId) || !inventory || !inventory.trackingEnabled || recordRefillGuard.current) return;
     recordRefillGuard.current = true;
     try {
       const added = validateRefillAddition(parseQuantity(quantityAdded, "Quantity added"));
@@ -83,7 +89,7 @@ export default function RefillSettingsScreen() {
   }
 
   async function submitRefill(added: number) {
-    if (!profileId || !medicationId) { recordRefillGuard.current = false; return; }
+    if (!profileId || !medicationId || (sourceProfileId && sourceProfileId !== profileId)) { recordRefillGuard.current = false; return; }
     setIsRecordingRefill(true); setError(null);
     try {
       const result = await recordRefill(profileId, medicationId, { quantityAdded: added, operationId: createOperationId() });
@@ -94,8 +100,11 @@ export default function RefillSettingsScreen() {
 
   const canRecordRefill = Boolean(inventory?.trackingEnabled && trackingEnabled);
   const isLow = Boolean(inventory && getRefillStockState(inventory) === "low");
+  if (sourceProfileId && sourceProfileId !== profileId) {
+    return <View style={styles.center}><Text style={styles.helper}>This refill screen belongs to the profile you left.</Text><ThemedButton label="Go back" tone="outline" onPress={() => router.back()} accessibilityLabel="Return to the previous screen" /></View>;
+  }
   return <View style={styles.container}>
-    {isLoading ? <View style={styles.center}><ActivityIndicator size="large" /><Text style={styles.helper}>Loading refill settings...</Text></View> : <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    {isLoading || loadedProfileId !== profileId ? <View style={styles.center}><ActivityIndicator size="large" /><Text style={styles.helper}>Loading refill settings...</Text></View> : <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>{medicationName || "Medication"}</Text><Text style={styles.intro}>Track an approximate remaining quantity. Stock history is an inventory record, not medical advice.</Text>
       {error ? <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorText}>{error}</Text><ThemedButton label="Try again" tone="outline" onPress={() => void load()} accessibilityLabel="Retry loading refill tracking" /></View> : null}
       <View style={styles.row}><View style={styles.rowText}><Text style={styles.label}>Enable refill tracking</Text><Text style={styles.helper}>Optional. It does not change your medication dosage.</Text></View><Switch value={trackingEnabled} onValueChange={setTrackingEnabled} accessibilityLabel="Enable refill tracking" trackColor={{ false: colors.disabledBackground, true: colors.primaryBackground }} /></View>
@@ -105,7 +114,7 @@ export default function RefillSettingsScreen() {
       <Text style={styles.helper}>Mr. Pill Pal does not calculate stock use from the dosage field.</Text>
       <Field label="Low-stock warning at" value={lowStockThreshold} onChangeText={setLowStockThreshold} accessibilityLabel="Low-stock warning quantity" />
       <ThemedButton label={isSaving ? "Saving..." : "Save refill tracking"} loading={isSaving} onPress={() => void save()} accessibilityLabel="Save refill tracking" style={styles.save} />
-      {inventory ? <View style={styles.refillPanel}><Text style={styles.panelTitle}>Record refill</Text>{canRecordRefill ? <><Text style={styles.helper}>Enter only the quantity you are adding. The new total is calculated safely.</Text><Field label="Quantity added" value={quantityAdded} onChangeText={setQuantityAdded} accessibilityLabel={`Quantity added in ${inventory.unit}`} /><ThemedButton label={isRecordingRefill ? "Recording..." : "Record refill"} loading={isRecordingRefill} disabled={isRecordingRefill} onPress={requestRecordRefill} accessibilityLabel={`Record refill for ${medicationName}`} style={styles.save} /></> : <Text style={styles.helper}>Enable refill tracking and save it before recording new stock. Existing stock history is preserved.</Text>}<ThemedButton label="Stock history" tone="outline" onPress={() => router.push({ pathname: "/stock-history" as never, params: { medicationId } })} accessibilityLabel={`View stock history for ${medicationName}`} style={styles.historyButton} /></View> : null}
+      {inventory ? <View style={styles.refillPanel}><Text style={styles.panelTitle}>Record refill</Text>{canRecordRefill ? <><Text style={styles.helper}>Enter only the quantity you are adding. The new total is calculated safely.</Text><Field label="Quantity added" value={quantityAdded} onChangeText={setQuantityAdded} accessibilityLabel={`Quantity added in ${inventory.unit}`} /><ThemedButton label={isRecordingRefill ? "Recording..." : "Record refill"} loading={isRecordingRefill} disabled={isRecordingRefill} onPress={requestRecordRefill} accessibilityLabel={`Record refill for ${medicationName}`} style={styles.save} /></> : <Text style={styles.helper}>Enable refill tracking and save it before recording new stock. Existing stock history is preserved.</Text>}<ThemedButton label="Stock history" tone="outline" onPress={() => router.push({ pathname: "/stock-history" as never, params: { medicationId, profileId } })} accessibilityLabel={`View stock history for ${medicationName}`} style={styles.historyButton} /></View> : null}
     </ScrollView>}</View>;
 }
 

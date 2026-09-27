@@ -22,6 +22,8 @@ export interface MedicationSchedule {
   reminderStatus: ReminderStatus;
   createdAt: string;
   updatedAt: string;
+  /** Last intentional time this schedule became eligible; excludes notification-health writes. */
+  effectiveAt?: string;
 }
 
 export interface CreateScheduleInput {

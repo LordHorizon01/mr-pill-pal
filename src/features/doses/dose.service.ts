@@ -1,5 +1,4 @@
-import { getActiveSchedulesByProfile } from "@/features/schedules/schedule.repository";
-import { getMedicationById } from "@/features/medications/medication.repository";
+import { getActiveSchedulesWithMedicationByProfile } from "@/features/schedules/schedule.repository";
 import { refreshReminderForDoseStatus } from "@/features/schedules/reminder-lifecycle.service";
 import { reconcileLowStockAlert } from "@/features/refills/low-stock-alert.service";
 
@@ -21,6 +20,7 @@ import {
   assertDoseCanBeRecordedOnLocalDate,
   evaluatePendingDoseStatus,
   scheduleOccursOnLocalDate,
+  scheduleOccurrenceIsAtOrAfterEffectiveTime,
   toLocalDateString,
   validateLocalDate,
   validateScheduledTime,
@@ -43,17 +43,16 @@ export async function generateDoseOccurrencesForDate(
   dateString = toLocalDateString(),
 ): Promise<void> {
   const normalizedDate = validateLocalDate(dateString);
-  const schedules = await getActiveSchedulesByProfile(profileId);
+  const schedules = await getActiveSchedulesWithMedicationByProfile(profileId);
   const occurrences: CreateDoseOccurrenceInput[] = [];
 
-  for (const schedule of schedules) {
+  for (const { schedule, medicationName, medicationDosage } of schedules) {
     if (!scheduleOccursOnLocalDate(schedule, normalizedDate)) {
       continue;
     }
 
-    const medication = await getMedicationById(profileId, schedule.medicationId);
-
-    if (!medication) {
+    const scheduledTime = validateScheduledTime(schedule.time);
+    if (!scheduleOccurrenceIsAtOrAfterEffectiveTime(schedule, normalizedDate, scheduledTime)) {
       continue;
     }
 
@@ -62,9 +61,9 @@ export async function generateDoseOccurrencesForDate(
       medicationId: schedule.medicationId,
       scheduleId: schedule.id,
       scheduledDate: normalizedDate,
-      scheduledTime: validateScheduledTime(schedule.time),
-      medicationName: medication.name,
-      medicationDosage: medication.dosage,
+      scheduledTime,
+      medicationName,
+      medicationDosage,
     });
   }
 

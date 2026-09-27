@@ -156,6 +156,7 @@ export const CREATE_SCHEDULES_TABLE = `
     reminder_status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    effective_at TEXT NOT NULL,
     FOREIGN KEY (medication_id)
       REFERENCES medications(id)
       ON DELETE CASCADE

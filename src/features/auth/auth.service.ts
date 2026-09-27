@@ -77,11 +77,11 @@ export async function ensureAccountDocument(user: AuthUser): Promise<void> {
   });
 }
 
-export function getCurrentAuthenticatedUser(expectedUid: string): AuthUser {
+export function getCurrentAuthenticatedUser(expectedUid?: string): AuthUser {
   requireConfiguredFirebase();
   const user = firebaseAuth().currentUser;
   if (!user) throw new Error("Your sign-in session ended. Please sign in again.");
-  if (user.uid !== expectedUid) throw new Error("Your sign-in session changed. Please sign in again.");
+  if (expectedUid && user.uid !== expectedUid) throw new Error("Your sign-in session changed. Please sign in again.");
   return user;
 }
 

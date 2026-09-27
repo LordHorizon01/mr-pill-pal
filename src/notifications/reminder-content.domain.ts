@@ -17,17 +17,21 @@ export function getStatusAwareReminderContent(input: {
   const { medicationName, hideMedicationName, profileName, status, statusRecordedAt } = input;
   if (status !== "taken" && status !== "skipped") {
     return {
-      title: "Medication Reminder",
+      title: hideMedicationName || !profileName
+        ? "Medication Reminder"
+        : `Medication Reminder for ${profileName}`,
       body: hideMedicationName
-        ? (profileName ? `Reminder for ${profileName}` : "It is time for a medication reminder.")
-        : (profileName ? `${profileName} - Time to take ${medicationName}` : `Time to take ${medicationName}`),
+        ? "It is time for a medication reminder."
+        : `Time to take ${medicationName}`,
     };
   }
 
   const statusLabel = status === "taken" ? "Taken" : "Skipped";
   const title = hideMedicationName
     ? "Medication status reminder"
-    : (status === "taken" ? "Dose already recorded" : "Dose status reminder");
+    : profileName
+      ? `Dose Status for ${profileName}`
+      : (status === "taken" ? "Dose already recorded" : "Dose status reminder");
   const subject = hideMedicationName ? "This dose" : medicationName;
   return {
     title,

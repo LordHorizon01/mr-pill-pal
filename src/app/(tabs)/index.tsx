@@ -91,6 +91,14 @@ export default function HomeScreen() {
     void loadDoses();
   }, [loadDoses]);
 
+  useEffect(() => {
+    setShowTaken(false);
+    setShowSkipped(false);
+    setShowMissed(false);
+    setStatusMenuDose(null);
+    setStatusMenuAnchor(null);
+  }, [selectedProfileId]);
+
   useFocusEffect(
     useCallback(() => {
       refreshDoses();
@@ -167,11 +175,7 @@ export default function HomeScreen() {
     const showsCorrectionOverflow = shouldShowDoseCorrectionOverflow(item.status);
 
     return (
-      <View
-        accessible
-        accessibilityLabel={`${item.medicationName}, ${item.medicationDosage}, scheduled for ${formatDate(item.scheduledDate)} at ${formatTime(item.scheduledTime)}, ${statusLabel}`}
-        style={styles.doseCard}
-      >
+      <View style={styles.doseCard}>
         <View style={styles.cardTopRow}>
           <Text style={styles.time}>{formatTime(item.scheduledTime)}</Text>
           <StatusBadge label={statusLabel} tone={isFutureDose && isPending ? "upcoming" : item.status} />
@@ -234,6 +238,7 @@ export default function HomeScreen() {
                 {selectedDate !== toLocalDateString() ? (
                   <Pressable
                     accessibilityRole="button"
+                    accessibilityLabel="Return to today"
                     onPress={() => void loadDoses(toLocalDateString())}
                   >
                     <Text style={styles.todayLink}>Back to today</Text>
@@ -275,7 +280,7 @@ export default function HomeScreen() {
                 onPress={clearError}
                 style={styles.errorBox}
               >
-                <Text style={styles.errorText}>{error}</Text>
+                <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>
                 <Text style={styles.errorHint}>Tap to dismiss</Text>
               </Pressable>
             ) : null}

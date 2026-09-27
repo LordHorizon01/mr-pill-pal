@@ -9,25 +9,35 @@ import { ReminderSettingsOverview } from "@/features/schedules/schedule.types";
 import { getReminderSettingsOverview } from "@/features/schedules/schedule.service";
 import { scheduleTestNotification } from "@/notifications/notification.service";
 import { useSettingsStore } from "@/state/settings.store";
+import { useProfileStore } from "@/state/profile.store";
 
 export default function ReminderSettingsScreen() {
   const { colors } = useAppTheme(); const styles = createStyles(colors);
+  const profileId = useProfileStore((state) => state.selectedProfileId);
   const { hideMedicationName, isLoading: privacyLoading, error: privacyError, loadSettings, setHideMedicationName, clearError: clearPrivacyError } = useSettingsStore();
-  const [overview, setOverview] = useState<ReminderSettingsOverview | null>(null);
+  const [loadedOverview, setLoadedOverview] = useState<ReminderSettingsOverview | null>(null);
+  const [overviewProfileId, setOverviewProfileId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isTesting, setIsTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const testingRef = useRef(false);
+  const overviewRequestRef = useRef(0);
+  const overview = overviewProfileId === profileId ? loadedOverview : null;
 
   const load = useCallback(async () => {
+    const request = ++overviewRequestRef.current;
     setIsLoading(true); setError(null);
-    try { setOverview(await getReminderSettingsOverview()); }
-    catch { setError("Reminder health could not be checked. Please try again."); }
-    finally { setIsLoading(false); }
-  }, []);
+    try {
+      const result = await getReminderSettingsOverview(profileId ?? undefined);
+      if (request !== overviewRequestRef.current) return;
+      setLoadedOverview(result); setOverviewProfileId(profileId);
+    } catch {
+      if (request === overviewRequestRef.current) setError("Reminder health could not be checked. Please try again.");
+    } finally { if (request === overviewRequestRef.current) setIsLoading(false); }
+  }, [profileId]);
 
-  useFocusEffect(useCallback(() => { void loadSettings(); void load(); return () => setNotice(null); }, [load, loadSettings]));
+  useFocusEffect(useCallback(() => { void loadSettings(); void load(); return () => { overviewRequestRef.current += 1; setNotice(null); }; }, [load, loadSettings]));
 
   async function openDeviceSettings() {
     try { await Linking.openSettings(); }
@@ -53,7 +63,7 @@ export default function ReminderSettingsScreen() {
     <AutoDismissNotice message={notice} onDismiss={() => setNotice(null)} />
     {(error || privacyError) ? <Pressable accessibilityRole="button" onPress={() => { setError(null); clearPrivacyError(); }} style={styles.error}><Text accessibilityLiveRegion="assertive" style={styles.errorText}>{error ?? privacyError}</Text><Text style={styles.hint}>Tap to dismiss</Text></Pressable> : null}
     <Section title="Reminder health"><View style={styles.healthRow}><Text style={styles.healthLabel}>{healthLabel}</Text>{isLoading ? <ActivityIndicator /> : null}</View><Text style={styles.description}>{overview?.health === "working" ? "Notification permission and saved native reminders are currently in a healthy state." : overview?.health === "permission_required" ? "Allow notifications in device settings, then return here to recheck reminders." : overview ? "Open an affected schedule below to review or retry it." : "Checking notification permission and saved reminders."}</Text><Pressable accessibilityRole="button" accessibilityLabel="Recheck reminder health" disabled={isLoading} onPress={() => void load()} style={styles.outlineButton}><Text style={styles.outlineText}>{isLoading ? "Checking..." : "Recheck reminder health"}</Text></Pressable></Section>
-    {overview?.affectedSchedules.length ? <Section title="Schedules needing attention">{overview.affectedSchedules.map((item) => <View key={item.scheduleId} style={styles.attentionRow}><View style={styles.attentionCopy}><Text style={styles.itemTitle}>{item.medicationName}</Text><Text style={styles.description}>{item.time} - {getReminderProblemLabel(item.reminderStatus)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={`Fix reminder for ${item.medicationName} at ${item.time}`} onPress={() => router.push({ pathname: "/schedule", params: { medicationId: item.medicationId, medicationName: item.medicationName } })} style={styles.fixButton}><Text style={styles.fixText}>Fix</Text></Pressable></View>)}</Section> : null}
+    {overview?.affectedSchedules.length ? <Section title="Schedules needing attention">{overview.affectedSchedules.map((item) => <View key={item.scheduleId} style={styles.attentionRow}><View style={styles.attentionCopy}><Text style={styles.itemTitle}>{item.medicationName}</Text><Text style={styles.description}>{item.time} - {getReminderProblemLabel(item.reminderStatus)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={`Fix reminder for ${item.medicationName} at ${item.time}`} onPress={() => router.push({ pathname: "/schedule", params: { medicationId: item.medicationId, medicationName: item.medicationName, profileId: profileId } })} style={styles.fixButton}><Text style={styles.fixText}>Fix</Text></Pressable></View>)}</Section> : null}
     <Section title="Notification tools"><Pressable accessibilityRole="button" accessibilityLabel="Send test notification" accessibilityState={{ busy: isTesting, disabled: isTesting }} disabled={isTesting} onPress={() => void testNotification()} style={styles.primaryButton}><Text style={styles.primaryText}>{isTesting ? "Scheduling test..." : "Test notification"}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Open device notification settings" onPress={() => void openDeviceSettings()} style={styles.outlineButton}><Text style={styles.outlineText}>Open device notification settings</Text></Pressable></Section>
     <Section title="Lock-screen privacy"><View style={styles.toggleRow}><View style={styles.toggleCopy}><Text style={styles.itemTitle}>Hide medication names</Text><Text style={styles.description}>When enabled, reminder notifications use general medication text.</Text></View><Switch accessibilityLabel="Hide medication names in notification text" accessibilityState={{ disabled: privacyLoading }} disabled={privacyLoading} value={hideMedicationName} onValueChange={(value) => void changePrivacy(value)} /></View>{privacyLoading ? <ActivityIndicator style={styles.smallLoader} /> : null}</Section>
     <Section title="Not receiving reminders?"><Text style={styles.description}>Check that notifications are allowed. Android may also delay reminders when battery restrictions are strong, after the app is force-stopped, or because of device-specific background settings.</Text><Text style={styles.hint}>Mr. Pill Pal does not claim to detect battery restrictions. Open app settings to review the options available on this phone.</Text><Pressable accessibilityRole="button" accessibilityLabel="Open app settings for reminder troubleshooting" onPress={() => void openDeviceSettings()} style={styles.outlineButton}><Text style={styles.outlineText}>Open app settings</Text></Pressable></Section>

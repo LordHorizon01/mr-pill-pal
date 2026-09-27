@@ -225,6 +225,7 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
       <Stack.Screen name="refill-settings" options={{ title: "Refill tracking" }} />
       <Stack.Screen name="stock-history" options={{ title: "Stock history" }} />
+      <Stack.Screen name="report-export" options={{ title: "Doctor / caregiver report" }} />
       <Stack.Screen name="dose-detail" options={{ title: "Dose details" }} />
       <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />

@@ -21,3 +21,13 @@ test("past same-day occurrences are not scheduled again", () => {
   const dates = getExpectedReminderDates(schedule({ time:"09:00" }), "2026-09-22", new Date(2026, 8, 22, 10, 0));
   assert.equal(dates.includes("2026-09-22"), false);
 });
+
+test("a selected future weekday remains scheduled after today's selected time has passed", () => {
+  const dates = getExpectedReminderDates(
+    schedule({ time: "08:00", repeatDays: [0, 6] }),
+    "2026-09-26",
+    new Date(2026, 8, 26, 21, 0),
+  );
+  assert.equal(dates.includes("2026-09-26"), false);
+  assert.equal(dates[0], "2026-09-27");
+});

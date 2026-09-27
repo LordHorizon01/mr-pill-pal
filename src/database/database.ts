@@ -290,6 +290,11 @@ async function initializeDatabaseTables(): Promise<void> {
       await transaction.execAsync(`ALTER TABLE schedules ADD COLUMN profile_id TEXT;`);
     }
 
+    if (!scheduleColumns.some((column) => column.name === "effective_at")) {
+      await transaction.execAsync(`ALTER TABLE schedules ADD COLUMN effective_at TEXT;`);
+      await transaction.execAsync(`UPDATE schedules SET effective_at = created_at WHERE effective_at IS NULL;`);
+    }
+
     await transaction.execAsync(CREATE_LOCAL_PROFILES_ACCOUNT_INDEX);
     await transaction.execAsync(CREATE_MEDICATION_PROFILE_INDEX);
     await transaction.execAsync(CREATE_MEDICATION_INVENTORY_PROFILE_INDEX);

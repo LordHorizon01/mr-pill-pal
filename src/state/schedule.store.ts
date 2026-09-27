@@ -54,14 +54,15 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
 
   loadSchedules: async (medicationId) => {
     const requestRevision = scheduleLoadGuard.begin();
+    const profileId = get().profileId;
+    if (!profileId) { set({ schedules: [], isLoading: false, error: null }); return; }
     set({
       isLoading: true,
       error: null,
     });
 
     try {
-      const schedules =
-        await getMedicationSchedules(medicationId);
+      const schedules = await getMedicationSchedules(profileId, medicationId);
 
       if (!scheduleLoadGuard.isCurrent(requestRevision)) return;
 
@@ -211,7 +212,7 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
     } catch (error) {
       if (existing) {
         try {
-          const schedules = await getMedicationSchedules(existing.medicationId);
+          const schedules = await getMedicationSchedules(existing.profileId, existing.medicationId);
           set({ schedules });
         } catch {
           // Keep the original edit error as the message shown to the user.

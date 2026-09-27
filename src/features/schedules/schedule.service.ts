@@ -1,7 +1,7 @@
 import { getMedicationById } from "@/features/medications/medication.repository";
 import { getHideMedicationName } from "@/features/settings/settings.repository";
-import { deletePendingDosesForScheduleFromDate } from "@/features/doses/dose.repository";
-import { toLocalDateString } from "@/features/doses/dose.domain";
+import { deletePendingDosesForScheduleFromLocalDateTime } from "@/features/doses/dose.repository";
+import { toLocalDateString, toLocalTimeString } from "@/features/doses/dose.domain";
 import { getLocalProfileById } from "@/features/profiles/profile.repository";
 import { getProfileGreetingName } from "@/features/profiles/profile.domain";
 
@@ -260,6 +260,7 @@ async function replaceScheduleNotifications(
   schedule: MedicationSchedule,
   medicationName: string,
   hideMedicationName?: boolean,
+  effectiveAt?: string,
 ): Promise<string[]> {
   const oldNotificationIds = getStoredNotificationIds(schedule);
   const newNotificationIds = await scheduleNativeNotifications(
@@ -282,6 +283,7 @@ async function replaceScheduleNotifications(
       schedule.id,
       "active",
       newNotificationIds,
+      effectiveAt,
     );
 
     return newNotificationIds;
@@ -630,13 +632,17 @@ export function addSchedule(input: CreateScheduleInput): Promise<MedicationSched
 }
 
 export async function getMedicationSchedules(
+  profileId: string,
   medicationId: string,
 ): Promise<MedicationSchedule[]> {
+  if (!profileId.trim()) {
+    throw new Error("Choose a profile before loading reminders.");
+  }
   if (!medicationId.trim()) {
     throw new Error("Medication ID is required.");
   }
 
-  const schedules = await getSchedulesByMedicationId(medicationId);
+  const schedules = await getSchedulesByMedicationId(profileId, medicationId);
   const expiredScheduleIds = await expirePastOneTimeSchedules(schedules);
 
   return expiredScheduleIds.length > 0
@@ -755,7 +761,7 @@ export async function updateMedicationSchedule(
     }
 
 
-    await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+    await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
 
     if (persistedStatus === "paused") {
       return updatedSchedule;
@@ -788,10 +794,10 @@ export async function updateMedicationSchedule(
   });
 }
 
-export async function getReminderSettingsOverview(): Promise<ReminderSettingsOverview> {
+export async function getReminderSettingsOverview(profileId?: string): Promise<ReminderSettingsOverview> {
   await reconcileReminderHealth();
   const permissionGranted = await hasNotificationPermission();
-  const schedules = await getSchedulesNeedingAttention();
+  const schedules = await getSchedulesNeedingAttention(profileId);
   const affectedSchedules = await Promise.all(schedules.map(async (schedule) => {
     const medication = await getMedicationById(schedule.profileId, schedule.medicationId);
     return {
@@ -826,7 +832,7 @@ export async function pauseSchedule(id: string): Promise<void> {
     }
 
     await setInactiveScheduleState(schedule, "paused");
-    await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+    await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
   });
 }
 
@@ -854,7 +860,7 @@ export async function resumeSchedule(id: string): Promise<string[]> {
   }
 
   try {
-    return await replaceScheduleNotifications(schedule, medication.name);
+    return await replaceScheduleNotifications(schedule, medication.name, undefined, new Date().toISOString());
   } catch (error) {
     await markScheduleAsUnavailable(
       schedule,
@@ -883,7 +889,7 @@ export async function removeSchedule(id: string): Promise<void> {
     await cancelScheduledNotifications(notificationIds);
   }
 
-  await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+  await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
   await deleteSchedule(id);
   });
 }
