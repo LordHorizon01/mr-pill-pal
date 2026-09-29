@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHistoryAccordionSections, resetExpandedHistoryDate } from "../src/features/history/history-accordion.domain";
+import { createHistoryAccordionSections, getHistoryReentryResetPlan, resetExpandedHistoryDate } from "../src/features/history/history-accordion.domain";
 
 type Record = { id: string };
 
@@ -40,4 +40,8 @@ test("a refreshed group after one deletion shows the new count and empty groups 
   const remaining = group(["a", "b", "c", "d", "e"]);
   assert.equal(createHistoryAccordionSections(remaining, null)[0].recordCount, 5);
   assert.deepEqual(createHistoryAccordionSections([], null), []);
+});
+
+test("History re-entry closes accordions and requests top scroll without resetting filters", () => {
+  assert.deepEqual(getHistoryReentryResetPlan(), { resetAccordion: true, scrollToTop: true, preserveFilters: true });
 });

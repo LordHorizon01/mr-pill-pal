@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { ReminderNotificationMetadata } from "./notification-metadata.types";
+import { getStatusAwareReminderContent } from "./reminder-content.domain";
+import { DoseStatus } from "@/features/doses/dose.types";
 
 const MEDICATION_CHANNEL_ID = "medication-reminders-v3";
 const PRIVATE_REMINDER_BODY = "It is time for a medication reminder.";
@@ -122,6 +124,8 @@ function getReminderNotificationData(metadata?: ReminderNotificationMetadata) {
     medicationId: metadata.medicationId,
     scheduleId: metadata.scheduleId,
     ...(metadata.doseId ? { doseId: metadata.doseId } : {}),
+    ...(metadata.scheduledDate ? { scheduledDate: metadata.scheduledDate } : {}),
+    ...(metadata.scheduledTime ? { scheduledTime: metadata.scheduledTime } : {}),
   };
 }
 
@@ -144,6 +148,21 @@ export async function scheduleTestNotification(): Promise<string> {
         seconds: 5,
         channelId: MEDICATION_CHANNEL_ID,
       },
+    });
+  } catch {
+    throw new NativeReminderSchedulingError();
+  }
+}
+
+/** Schedules one immediate, factual inventory alert. Permission is never requested here. */
+export async function scheduleLowStockNotification(content: { title: string; body: string }, profileId: string, medicationId: string): Promise<string> {
+  if (!(await hasNotificationPermission())) {
+    throw new NotificationPermissionError();
+  }
+  try {
+    return await Notifications.scheduleNotificationAsync({
+      content: { title: content.title, body: content.body, data: { profileId, medicationId, kind: "low_stock" } },
+      trigger: null,
     });
   } catch {
     throw new NativeReminderSchedulingError();
@@ -192,6 +211,8 @@ export async function scheduleOneTimeMedicationReminder(
   hideMedicationName = false,
   metadata?: ReminderNotificationMetadata,
   profileName?: string,
+  status?: DoseStatus,
+  statusRecordedAt?: string,
 ): Promise<string> {
   const hasPermission = await initializeNotifications();
 
@@ -235,10 +256,11 @@ export async function scheduleOneTimeMedicationReminder(
   }
 
   try {
+    const content = getStatusAwareReminderContent({ medicationName, hideMedicationName, profileName, status, statusRecordedAt });
     return await Notifications.scheduleNotificationAsync({
       content: {
-        title: "Medication Reminder",
-        body: getMedicationReminderBody(medicationName, hideMedicationName, profileName),
+        title: content.title,
+        body: content.body,
         data: getReminderNotificationData(metadata),
       },
 

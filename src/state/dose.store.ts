@@ -5,6 +5,7 @@ import {
   getDosesForDate,
   markSkipped,
   markTaken,
+  correctDoseStatus,
   toLocalDateString,
 } from "@/features/doses/dose.service";
 import { TodayDose } from "@/features/doses/dose.types";
@@ -38,6 +39,7 @@ interface DoseState {
   setSelectedDate: (date: string) => void;
   recordTaken: (id: string) => Promise<void>;
   recordSkipped: (id: string) => Promise<void>;
+  correctStatus: (id: string, target: "taken" | "skipped") => Promise<void>;
   clearError: () => void;
   setProfile: (profileId: string | null) => void;
 }
@@ -113,6 +115,19 @@ export const useDoseStore = create<DoseState>((set, get) => ({
           "Could not record this dose as skipped. Please try again.",
         ),
       });
+    } finally {
+      set({ updatingDoseId: null });
+    }
+  },
+
+  correctStatus: async (id, target) => {
+    if (get().updatingDoseId) return;
+    set({ updatingDoseId: id, error: null });
+    try {
+      await correctDoseStatus(get().profileId!, id, target);
+      await get().loadDoses();
+    } catch (error) {
+      set({ error: getSafeDoseErrorMessage(error, "Could not update this dose status. Please try again.") });
     } finally {
       set({ updatingDoseId: null });
     }

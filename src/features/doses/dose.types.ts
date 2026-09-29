@@ -10,6 +10,7 @@ export interface DoseRecord {
   scheduledAt: string;
   status: DoseStatus;
   takenAt?: string;
+  statusRecordedAt?: string;
   notes?: string;
   medicationName?: string;
   medicationDosage?: string;

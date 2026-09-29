@@ -24,6 +24,10 @@ export function toLocalDateString(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+export function toLocalTimeString(date = new Date()): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 export function addDaysToLocalDate(dateString: string, days: number): string {
   const date = parseLocalDate(validateLocalDate(dateString));
   date.setDate(date.getDate() + days);
@@ -121,6 +125,23 @@ export function scheduleOccursOnLocalDate(
   }
 
   return repeatDays.includes(parseLocalDate(dateString).getDay());
+}
+
+/** Keep generation aligned with the local device clock, without treating reminder-health writes as schedule edits. */
+export function scheduleOccurrenceIsAtOrAfterEffectiveTime(
+  schedule: MedicationSchedule,
+  dateString: string,
+  timeString: string,
+): boolean {
+  const effectiveTimestamp = Date.parse(schedule.effectiveAt ?? schedule.createdAt);
+  if (!Number.isFinite(effectiveTimestamp)) return true;
+
+  const normalizedDate = validateLocalDate(dateString);
+  const normalizedTime = validateScheduledTime(timeString);
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  const [hour, minute] = normalizedTime.split(":").map(Number);
+  const occurrence = new Date(year, month - 1, day, hour, minute, 0, 0);
+  return occurrence.getTime() >= effectiveTimestamp;
 }
 
 export function isDoseStatusTransitionAllowed(

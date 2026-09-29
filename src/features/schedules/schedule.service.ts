@@ -1,7 +1,7 @@
 import { getMedicationById } from "@/features/medications/medication.repository";
 import { getHideMedicationName } from "@/features/settings/settings.repository";
-import { deletePendingDosesForScheduleFromDate } from "@/features/doses/dose.repository";
-import { toLocalDateString } from "@/features/doses/dose.domain";
+import { deletePendingDosesForScheduleFromLocalDateTime } from "@/features/doses/dose.repository";
+import { toLocalDateString, toLocalTimeString } from "@/features/doses/dose.domain";
 import { getLocalProfileById } from "@/features/profiles/profile.repository";
 import { getProfileGreetingName } from "@/features/profiles/profile.domain";
 
@@ -25,10 +25,10 @@ import {
   hasNotificationPermission,
   NotificationPermissionError,
   ReminderTimeExpiredError,
-  scheduleDailyMedicationReminder,
   scheduleOneTimeMedicationReminder,
-  scheduleWeeklyMedicationReminders,
 } from "@/notifications/notification.service";
+import { getExpectedReminderDates } from "./reminder-occurrence.domain";
+import { getDoseOccurrenceReminderStatus, hasScheduledReminderOccurrences, markScheduleOccurrencesCancelled, saveReminderOccurrence } from "./reminder-occurrence.repository";
 
 import {
   CreateScheduleInput,
@@ -174,45 +174,29 @@ async function scheduleNativeNotifications(
   const profile = await getLocalProfileById(schedule.profileId);
   const profileName = getProfileGreetingName(profile) ?? undefined;
 
-  if (schedule.type === "one_time") {
-    const notificationId = await scheduleOneTimeMedicationReminder(
-      medicationName,
-      schedule.startDate,
-      schedule.time,
-      shouldHideMedicationName,
-      { medicationId: schedule.medicationId, scheduleId: schedule.id, profileId: schedule.profileId },
-      profileName,
-    );
-
-    return [notificationId];
+  const dates = schedule.type === "one_time" ? [schedule.startDate] : getExpectedReminderDates(schedule);
+  const notificationIds: string[] = [];
+  try {
+    for (const date of dates) {
+      const doseStatus = await getDoseOccurrenceReminderStatus(schedule.profileId, schedule.id, date, schedule.time);
+      const notificationId = await scheduleOneTimeMedicationReminder(
+        medicationName, date, schedule.time, shouldHideMedicationName,
+        { medicationId: schedule.medicationId, scheduleId: schedule.id, profileId: schedule.profileId, scheduledDate: date, scheduledTime: schedule.time }, profileName,
+        doseStatus?.status, doseStatus?.statusRecordedAt,
+      );
+      try {
+        await saveReminderOccurrence({ profileId: schedule.profileId, medicationId: schedule.medicationId, scheduleId: schedule.id, scheduledDate: date, scheduledTime: schedule.time, nativeNotificationId: notificationId });
+        notificationIds.push(notificationId);
+      } catch (error) {
+        await cancelNotificationsSilently([notificationId]);
+        throw error;
+      }
+    }
+    return notificationIds;
+  } catch (error) {
+    await cancelNotificationsSilently(notificationIds);
+    throw error;
   }
-
-  const repeatDays = schedule.repeatDays ?? [];
-
-  if (repeatDays.length === 0) {
-    throw new Error("Recurring schedule has no repeat days.");
-  }
-
-  if (repeatDays.length === 7) {
-    const notificationId = await scheduleDailyMedicationReminder(
-      medicationName,
-      schedule.time,
-      shouldHideMedicationName,
-      { medicationId: schedule.medicationId, scheduleId: schedule.id, profileId: schedule.profileId },
-      profileName,
-    );
-
-    return [notificationId];
-  }
-
-  return scheduleWeeklyMedicationReminders(
-    medicationName,
-    schedule.time,
-    repeatDays,
-    shouldHideMedicationName,
-    { medicationId: schedule.medicationId, scheduleId: schedule.id, profileId: schedule.profileId },
-    profileName,
-  );
 }
 
 function isPastOneTimeSchedule(schedule: MedicationSchedule): boolean {
@@ -240,6 +224,8 @@ async function setInactiveScheduleState(
   if (notificationIds.length > 0) {
     await cancelScheduledNotifications(notificationIds);
   }
+
+  await markScheduleOccurrencesCancelled(schedule.id);
 
   await setScheduleReminderState(schedule.id, reminderStatus);
 }
@@ -274,6 +260,7 @@ async function replaceScheduleNotifications(
   schedule: MedicationSchedule,
   medicationName: string,
   hideMedicationName?: boolean,
+  effectiveAt?: string,
 ): Promise<string[]> {
   const oldNotificationIds = getStoredNotificationIds(schedule);
   const newNotificationIds = await scheduleNativeNotifications(
@@ -296,6 +283,7 @@ async function replaceScheduleNotifications(
       schedule.id,
       "active",
       newNotificationIds,
+      effectiveAt,
     );
 
     return newNotificationIds;
@@ -481,7 +469,7 @@ async function reconcileReminderHealthInternal(accountUid?: string): Promise<Rem
       nativeNotificationIds,
     );
 
-    if (isHealthy) {
+    if (isHealthy && await hasScheduledReminderOccurrences(schedule.profileId, schedule.id)) {
       continue;
     }
 
@@ -644,13 +632,17 @@ export function addSchedule(input: CreateScheduleInput): Promise<MedicationSched
 }
 
 export async function getMedicationSchedules(
+  profileId: string,
   medicationId: string,
 ): Promise<MedicationSchedule[]> {
+  if (!profileId.trim()) {
+    throw new Error("Choose a profile before loading reminders.");
+  }
   if (!medicationId.trim()) {
     throw new Error("Medication ID is required.");
   }
 
-  const schedules = await getSchedulesByMedicationId(medicationId);
+  const schedules = await getSchedulesByMedicationId(profileId, medicationId);
   const expiredScheduleIds = await expirePastOneTimeSchedules(schedules);
 
   return expiredScheduleIds.length > 0
@@ -769,7 +761,7 @@ export async function updateMedicationSchedule(
     }
 
 
-    await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+    await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
 
     if (persistedStatus === "paused") {
       return updatedSchedule;
@@ -802,10 +794,10 @@ export async function updateMedicationSchedule(
   });
 }
 
-export async function getReminderSettingsOverview(): Promise<ReminderSettingsOverview> {
+export async function getReminderSettingsOverview(profileId?: string): Promise<ReminderSettingsOverview> {
   await reconcileReminderHealth();
   const permissionGranted = await hasNotificationPermission();
-  const schedules = await getSchedulesNeedingAttention();
+  const schedules = await getSchedulesNeedingAttention(profileId);
   const affectedSchedules = await Promise.all(schedules.map(async (schedule) => {
     const medication = await getMedicationById(schedule.profileId, schedule.medicationId);
     return {
@@ -840,7 +832,7 @@ export async function pauseSchedule(id: string): Promise<void> {
     }
 
     await setInactiveScheduleState(schedule, "paused");
-    await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+    await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
   });
 }
 
@@ -868,7 +860,7 @@ export async function resumeSchedule(id: string): Promise<string[]> {
   }
 
   try {
-    return await replaceScheduleNotifications(schedule, medication.name);
+    return await replaceScheduleNotifications(schedule, medication.name, undefined, new Date().toISOString());
   } catch (error) {
     await markScheduleAsUnavailable(
       schedule,
@@ -897,7 +889,7 @@ export async function removeSchedule(id: string): Promise<void> {
     await cancelScheduledNotifications(notificationIds);
   }
 
-  await deletePendingDosesForScheduleFromDate(id, toLocalDateString());
+  await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
   await deleteSchedule(id);
   });
 }

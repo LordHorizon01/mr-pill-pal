@@ -11,6 +11,7 @@ export function useDoses() {
     setSelectedDate: useDoseStore((state) => state.setSelectedDate),
     recordTaken: useDoseStore((state) => state.recordTaken),
     recordSkipped: useDoseStore((state) => state.recordSkipped),
+    correctStatus: useDoseStore((state) => state.correctStatus),
     clearError: useDoseStore((state) => state.clearError),
   };
 }

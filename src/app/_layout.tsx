@@ -29,6 +29,7 @@ import {
   ReminderHealthResult,
 } from "@/features/schedules/schedule.service";
 import { generateDoseOccurrencesForDate } from "@/features/doses/dose.service";
+import { reconcileLowStockAlertsForAccount } from "@/features/refills/low-stock-alert.service";
 import { useAuthStore } from "@/state/auth.store";
 import { useProfileStore } from "@/state/profile.store";
 import { AuthGate } from "@/components/auth-gate";
@@ -171,6 +172,7 @@ export default function RootLayout() {
           setIsStartupReminderHealthReady(true);
         }
       }
+      void reconcileLowStockAlertsForAccount(accountUid);
     }
 
     void checkReminderHealth(true);
@@ -221,6 +223,9 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
     <AppDrawerProvider><Stack screenOptions={{ headerStyle: { backgroundColor: colors.background }, headerTintColor: colors.primary, headerTitleStyle: { fontSize: 20, fontWeight: "700", color: colors.text }, headerShadowVisible: true }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
+      <Stack.Screen name="refill-settings" options={{ title: "Refill tracking" }} />
+      <Stack.Screen name="stock-history" options={{ title: "Stock history" }} />
+      <Stack.Screen name="report-export" options={{ title: "Doctor / caregiver report" }} />
       <Stack.Screen name="dose-detail" options={{ title: "Dose details" }} />
       <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />

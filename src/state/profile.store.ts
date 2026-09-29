@@ -9,6 +9,7 @@ import { CreateProfileInput, Profile, UpdateProfileInput } from "@/features/prof
 import { createAsyncRequestGuard } from "@/state/async-request.domain";
 
 const profileLoadGuard = createAsyncRequestGuard();
+const profileSelectionGuard = createAsyncRequestGuard();
 
 type ProfileState = {
   accountUid: string | null; profiles: Profile[]; selectedProfileId: string | null; isLoading: boolean; isSaving: boolean; error: string | null; needsLegacyAdoption: boolean;
@@ -31,8 +32,9 @@ function logProfileSetupFailure(error: unknown): void {
 export const useProfileStore = create<ProfileState>((set, get) => ({
   accountUid: null, profiles: [], selectedProfileId: null, isLoading: false, isSaving: false, error: null, needsLegacyAdoption: false,
   loadForAccount: async (accountUid) => {
+    profileSelectionGuard.invalidate();
     const requestRevision = profileLoadGuard.begin();
-    set({ isLoading: true, error: null, accountUid });
+    set({ isLoading: true, isSaving: false, error: null, accountUid });
     try {
       let profiles: Profile[];
       try { profiles = await listRemoteProfiles(accountUid); for (const profile of profiles) await saveLocalProfile(profile); }
@@ -49,9 +51,25 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     } catch (error) { if (profileLoadGuard.isCurrent(requestRevision)) set({ isLoading: false, error: getSafeDatabaseErrorMessage(error, "Could not load profiles. Please try again.") }); return false; }
   },
   selectProfile: async (profileId) => {
-    const accountUid = get().accountUid; if (!accountUid) throw new Error("Sign in before switching profiles."); set({ isSaving: true, error: null });
-    try { const profile = await getLocalProfile(accountUid, profileId); if (!profile || !profile.isActive) throw new Error("This profile is not available for this account."); await saveSelectedProfileId(accountUid, profileId); await syncProfileScopedStores(profileId); set({ selectedProfileId: profileId, isSaving: false }); }
-    catch (error) { set({ isSaving: false, error: toAuthMessage(error, "Could not switch profiles. Please try again.") }); throw error; }
+    const accountUid = get().accountUid;
+    if (!accountUid) throw new Error("Sign in before switching profiles.");
+    if (get().selectedProfileId === profileId) return;
+    const requestRevision = profileSelectionGuard.begin();
+    set({ isSaving: true, error: null });
+    try {
+      const profile = await getLocalProfile(accountUid, profileId);
+      if (!profile || !profile.isActive) throw new Error("This profile is not available for this account.");
+      if (!profileSelectionGuard.isCurrent(requestRevision) || get().accountUid !== accountUid) return;
+      await saveSelectedProfileId(accountUid, profileId);
+      if (!profileSelectionGuard.isCurrent(requestRevision) || get().accountUid !== accountUid) return;
+      await syncProfileScopedStores(profileId);
+      if (!profileSelectionGuard.isCurrent(requestRevision) || get().accountUid !== accountUid) return;
+      set({ selectedProfileId: profileId, isSaving: false });
+    } catch (error) {
+      if (!profileSelectionGuard.isCurrent(requestRevision)) return;
+      set({ isSaving: false, error: toAuthMessage(error, "Could not switch profiles. Please try again.") });
+      throw error;
+    }
   },
   createProfile: async (input) => {
     if (activeProfileCreation) return activeProfileCreation;
@@ -128,6 +146,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   deferLegacyAdoption: async () => { const accountUid = get().accountUid; if (!accountUid) return; await saveLegacyAdoptionDeferred(accountUid); set({ needsLegacyAdoption: false }); },
   clearForLogout: async () => {
     profileLoadGuard.invalidate();
+    profileSelectionGuard.invalidate();
     const accountUid = get().accountUid;
     try {
       if (accountUid) await saveSelectedProfileId(accountUid, null);

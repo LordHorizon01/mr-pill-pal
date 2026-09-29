@@ -9,6 +9,7 @@ import {
   isDoseExpired,
   isDoseStatusTransitionAllowed,
   scheduleOccursOnLocalDate,
+  scheduleOccurrenceIsAtOrAfterEffectiveTime,
   toLocalDateString,
 } from "../src/features/doses/dose.domain";
 import { MedicationSchedule } from "../src/features/schedules/schedule.types";
@@ -54,6 +55,34 @@ test("selected weekdays generate only on their selected local weekday", () => {
   assert.equal(scheduleOccursOnLocalDate(selectedDays, "2024-01-01"), true); // Monday
   assert.equal(scheduleOccursOnLocalDate(selectedDays, "2024-01-02"), false); // Tuesday
   assert.equal(scheduleOccursOnLocalDate(selectedDays, "2024-01-03"), true); // Wednesday
+});
+
+test("new daily schedules skip today's already-passed time but keep today's future time", () => {
+  const createdAt = new Date(2026, 8, 26, 21, 4, 0).toISOString();
+  const daily = schedule({ startDate: "2026-09-26", repeatDays: [0, 1, 2, 3, 4, 5, 6], createdAt, effectiveAt: createdAt });
+
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(daily, "2026-09-26", "09:00"), false);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(daily, "2026-09-26", "22:00"), true);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(daily, "2026-09-27", "09:00"), true);
+});
+
+test("selected weekdays skip an expired selected day and include the next eligible weekday", () => {
+  const createdAt = new Date(2026, 8, 26, 21, 0, 0).toISOString();
+  const weekend = schedule({ startDate: "2026-09-26", repeatDays: [0, 6], createdAt, effectiveAt: createdAt });
+
+  assert.equal(scheduleOccursOnLocalDate(weekend, "2026-09-26"), true);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(weekend, "2026-09-26", "08:00"), false);
+  assert.equal(scheduleOccursOnLocalDate(weekend, "2026-09-27"), true);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(weekend, "2026-09-27", "08:00"), true);
+});
+
+test("an occurrence exactly at effective time is eligible; an edit does not backfill earlier today", () => {
+  const effectiveAt = new Date(2026, 8, 26, 21, 0, 0).toISOString();
+  const edited = schedule({ startDate: "2026-09-26", time: "08:00", effectiveAt });
+
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(edited, "2026-09-26", "21:00"), true);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(edited, "2026-09-26", "08:00"), false);
+  assert.equal(scheduleOccurrenceIsAtOrAfterEffectiveTime(edited, "2026-09-27", "08:00"), true);
 });
 
 test("two medicines at the same clock time remain separate schedule occurrences", () => {

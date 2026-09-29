@@ -22,6 +22,18 @@ type ScheduleRow = {
   reminder_status: ReminderStatus | null;
   created_at: string;
   updated_at: string;
+  effective_at: string | null;
+};
+
+type ActiveScheduleMedicationRow = ScheduleRow & {
+  medication_name: string;
+  medication_dosage: string;
+};
+
+export type ActiveScheduleWithMedication = {
+  schedule: MedicationSchedule;
+  medicationName: string;
+  medicationDosage: string;
 };
 
 function parseNotificationIds(
@@ -66,6 +78,7 @@ function mapScheduleRow(row: ScheduleRow): MedicationSchedule {
       row.reminder_status ?? (row.is_active === 1 ? "active" : "paused"),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    effectiveAt: row.effective_at ?? row.created_at,
   };
 }
 
@@ -93,9 +106,10 @@ export async function createSchedule(
       is_active,
       reminder_status,
       created_at,
-      updated_at
+      updated_at,
+      effective_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.profileId ?? null,
@@ -107,6 +121,7 @@ export async function createSchedule(
       input.repeatDays ? JSON.stringify(input.repeatDays) : null,
       1,
       "active",
+      now,
       now,
       now,
       ],
@@ -125,6 +140,7 @@ export async function createSchedule(
       reminderStatus: "active",
       createdAt: now,
       updatedAt: now,
+      effectiveAt: now,
     };
   });
 }
@@ -174,6 +190,35 @@ export async function getActiveSchedulesByProfile(
   });
 }
 
+/**
+ * Dose generation needs the active schedule and the medication snapshot for
+ * each occurrence. Keeping that lookup in one profile-scoped query avoids an
+ * extra serialized SQLite read per schedule.
+ */
+export async function getActiveSchedulesWithMedicationByProfile(
+  profileId: string,
+): Promise<ActiveScheduleWithMedication[]> {
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<ActiveScheduleMedicationRow>(
+      `SELECT schedules.*, medications.name AS medication_name,
+              medications.dosage AS medication_dosage
+       FROM schedules
+       INNER JOIN medications
+         ON medications.id = schedules.medication_id
+        AND medications.profile_id = schedules.profile_id
+       WHERE schedules.profile_id = ? AND schedules.is_active = 1
+       ORDER BY schedules.time ASC`,
+      [profileId],
+    );
+
+    return rows.map((row) => ({
+      schedule: mapScheduleRow(row),
+      medicationName: row.medication_name,
+      medicationDosage: row.medication_dosage,
+    }));
+  });
+}
+
 export async function getSchedulesForReminderHealth(accountUid?: string): Promise<MedicationSchedule[]> {
   return runDatabaseOperation(async (db) => {
     const rows = await db.getAllAsync<ScheduleRow>(
@@ -200,13 +245,13 @@ export async function getSchedulesByAccount(accountUid: string): Promise<Medicat
   });
 }
 
-export async function getSchedulesNeedingAttention(): Promise<MedicationSchedule[]> {
+export async function getSchedulesNeedingAttention(profileId?: string): Promise<MedicationSchedule[]> {
   return runDatabaseOperation(async (db) => {
     const rows = await db.getAllAsync<ScheduleRow>(
-      `SELECT *
-       FROM schedules
-       WHERE reminder_status IN ('permission_required', 'scheduling_failed')
-       ORDER BY time ASC`,
+      profileId
+        ? `SELECT * FROM schedules WHERE profile_id = ? AND reminder_status IN ('permission_required', 'scheduling_failed') ORDER BY time ASC`
+        : `SELECT * FROM schedules WHERE reminder_status IN ('permission_required', 'scheduling_failed') ORDER BY time ASC`,
+      profileId ? [profileId] : [],
     );
 
     return rows.map(mapScheduleRow);
@@ -300,6 +345,7 @@ export async function setScheduleReminderState(
   id: string,
   reminderStatus: ReminderStatus,
   notificationIds: string[] = [],
+  effectiveAt?: string,
 ): Promise<void> {
   const isActive = reminderStatus === "active";
 
@@ -310,12 +356,14 @@ export async function setScheduleReminderState(
          reminder_status = ?,
          notification_ids = ?,
          notification_id = NULL,
+         effective_at = COALESCE(?, effective_at),
          updated_at = ?
      WHERE id = ?`,
       [
         isActive ? 1 : 0,
         reminderStatus,
         notificationIds.length > 0 ? JSON.stringify(notificationIds) : null,
+        effectiveAt ?? null,
         new Date().toISOString(),
         id,
       ],
@@ -344,6 +392,7 @@ export async function updateScheduleDetails(
            reminder_status = ?,
            notification_id = NULL,
            notification_ids = NULL,
+           effective_at = ?,
            updated_at = ?
        WHERE id = ?`,
       [
@@ -352,6 +401,7 @@ export async function updateScheduleDetails(
         input.endDate ?? null,
         input.repeatDays ? JSON.stringify(input.repeatDays) : null,
         reminderStatus,
+        now,
         now,
         id,
       ],

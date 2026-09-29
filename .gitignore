@@ -31,6 +31,9 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
 .env*.local
 google-services.json
 GoogleService-Info.plist

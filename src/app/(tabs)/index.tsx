@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,9 @@ import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
 import { getHomeGreeting } from "@/features/profiles/profile.domain";
 import { StatusBadge, ThemedButton } from "@/components/themed-ui";
+import { DoseStatusOverflowSheet } from "@/features/doses/dose-status-overflow-sheet";
+import { shouldShowDoseCorrectionOverflow } from "@/features/doses/dose-card-presentation.domain";
+import { AnchoredMenuAnchor } from "@/components/anchored-action-menu.domain";
 
 const UPCOMING_STATUS_LABEL = "Upcoming";
 
@@ -69,11 +72,15 @@ export default function HomeScreen() {
     loadDoses,
     recordTaken,
     recordSkipped,
+    correctStatus,
     clearError,
   } = useDoses();
   const [showTaken, setShowTaken] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
   const [showMissed, setShowMissed] = useState(false);
+  const [statusMenuDose, setStatusMenuDose] = useState<TodayDose | null>(null);
+  const [statusMenuAnchor, setStatusMenuAnchor] = useState<AnchoredMenuAnchor | null>(null);
+  const statusMenuAnchorRefs = useRef<Record<string, View | null>>({});
   const pendingDoses = useMemo(() => doses.filter((dose) => dose.status === "pending"), [doses]);
   const takenDoses = useMemo(() => doses.filter((dose) => dose.status === "taken"), [doses]);
   const skippedDoses = useMemo(() => doses.filter((dose) => dose.status === "skipped"), [doses]);
@@ -83,6 +90,14 @@ export default function HomeScreen() {
   const refreshDoses = useCallback(() => {
     void loadDoses();
   }, [loadDoses]);
+
+  useEffect(() => {
+    setShowTaken(false);
+    setShowSkipped(false);
+    setShowMissed(false);
+    setStatusMenuDose(null);
+    setStatusMenuAnchor(null);
+  }, [selectedProfileId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -119,6 +134,24 @@ export default function HomeScreen() {
     );
   }
 
+  function confirmStatusCorrection(dose: TodayDose, target: "taken" | "skipped") {
+    setStatusMenuDose(null);
+    setStatusMenuAnchor(null);
+    const targetLabel = target === "taken" ? "Taken" : "Skipped";
+    Alert.alert("Change dose status?", `This dose is currently recorded as ${dose.status === "taken" ? "Taken" : "Skipped"}. Change it to ${targetLabel}?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: `Change to ${targetLabel}`, onPress: () => void correctStatus(dose.id, target) },
+    ]);
+  }
+
+  function openStatusMenu(dose: TodayDose) {
+    const anchor = statusMenuAnchorRefs.current[dose.id];
+    anchor?.measureInWindow((x, y, width, height) => {
+      setStatusMenuAnchor({ x, y, width, height });
+      setStatusMenuDose(dose);
+    });
+  }
+
   function renderDose({ item }: { item: TodayDose }) {
     const isUpdating = updatingDoseId === item.id;
     const isPending = item.status === "pending";
@@ -128,13 +161,21 @@ export default function HomeScreen() {
     );
     const isFutureDose = presentation.label === UPCOMING_STATUS_LABEL;
     const statusLabel = presentation.label;
+    const statusDescription = isFutureDose && isPending
+      ? `Upcoming - scheduled for ${formatDate(item.scheduledDate)}`
+      : item.status === "taken" && item.takenAt
+        ? `Taken at ${formatTakenAt(item.takenAt)}`
+        : item.status === "skipped"
+          ? item.statusRecordedAt
+            ? `Skipped at ${formatTakenAt(item.statusRecordedAt)}`
+            : "Skipped"
+          : item.status === "missed"
+            ? "Missed"
+            : "Pending - not yet recorded";
+    const showsCorrectionOverflow = shouldShowDoseCorrectionOverflow(item.status);
 
     return (
-      <View
-        accessible
-        accessibilityLabel={`${item.medicationName}, ${item.medicationDosage}, scheduled for ${formatDate(item.scheduledDate)} at ${formatTime(item.scheduledTime)}, ${statusLabel}`}
-        style={styles.doseCard}
-      >
+      <View style={styles.doseCard}>
         <View style={styles.cardTopRow}>
           <Text style={styles.time}>{formatTime(item.scheduledTime)}</Text>
           <StatusBadge label={statusLabel} tone={isFutureDose && isPending ? "upcoming" : item.status} />
@@ -143,17 +184,16 @@ export default function HomeScreen() {
         <Text style={styles.medicationName}>{item.medicationName}</Text>
         <Text style={styles.dosage}>{item.medicationDosage}</Text>
 
-        <Text style={styles.statusDescription}>
-          {isFutureDose && isPending
-            ? `Upcoming - scheduled for ${formatDate(item.scheduledDate)}`
-            : item.status === "taken" && item.takenAt
-              ? `Taken at ${formatTakenAt(item.takenAt)}`
-              : item.status === "skipped"
-                ? "Skipped"
-                : item.status === "missed"
-                  ? "Missed"
-                  : "Pending - not yet recorded"}
-        </Text>
+        {showsCorrectionOverflow ? (
+          <View style={styles.finalizedStatusRow}>
+            <Text style={[styles.statusDescription, styles.finalizedStatusDescription]}>{statusDescription}</Text>
+            <View ref={(node) => { statusMenuAnchorRefs.current[item.id] = node; }} collapsable={false}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.medicationName} dose`} onPress={() => openStatusMenu(item)} disabled={Boolean(updatingDoseId)} style={styles.overflowButton}>
+                <Text style={styles.overflowText}>⋮</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : <Text style={styles.statusDescription}>{statusDescription}</Text>}
 
         {presentation.canRecord ? (
           <View style={styles.actionRow}>
@@ -198,6 +238,7 @@ export default function HomeScreen() {
                 {selectedDate !== toLocalDateString() ? (
                   <Pressable
                     accessibilityRole="button"
+                    accessibilityLabel="Return to today"
                     onPress={() => void loadDoses(toLocalDateString())}
                   >
                     <Text style={styles.todayLink}>Back to today</Text>
@@ -239,7 +280,7 @@ export default function HomeScreen() {
                 onPress={clearError}
                 style={styles.errorBox}
               >
-                <Text style={styles.errorText}>{error}</Text>
+                <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>
                 <Text style={styles.errorHint}>Tap to dismiss</Text>
               </Pressable>
             ) : null}
@@ -264,6 +305,7 @@ export default function HomeScreen() {
           <FinalizedSection label="Missed today" doses={missedDoses} expanded={showMissed} onToggle={() => setShowMissed((value) => !value)} renderDose={renderDose} />
         </View>}
       />
+      <DoseStatusOverflowSheet dose={statusMenuDose} anchor={statusMenuAnchor} onClose={() => { setStatusMenuDose(null); setStatusMenuAnchor(null); }} onCorrect={(target) => statusMenuDose && confirmStatusCorrection(statusMenuDose, target)} />
     </View>
   );
 }
@@ -337,6 +379,10 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
+  finalizedStatusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 10 },
+  finalizedStatusDescription: { flex: 1, minWidth: 0, marginTop: 0 },
+  overflowButton: { minWidth: ui.touch.minimum, minHeight: ui.touch.minimum, alignItems: "center", justifyContent: "center", borderRadius: ui.radius.button },
+  overflowText: { fontSize: 24, lineHeight: 28, color: colors.textPrimary },
   time: { fontSize: 19, fontWeight: "700", color: colors.cardForeground },
   medicationName: { marginTop: 14, fontSize: 19, fontWeight: "700", color: colors.cardForeground },
   dosage: { marginTop: 3, fontSize: 16, color: colors.textSecondary },

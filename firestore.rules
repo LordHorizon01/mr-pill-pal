@@ -4,6 +4,85 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function ownAccount(uid) { return signedIn() && request.auth.uid == uid; }
 
+    // profileAccess documents are authorization metadata only. Their complete
+    // schema deliberately excludes medication, dose, refill, condition,
+    // allergy, report, and profile-detail data.
+    function caregiverAccessHasValidShape(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'profileId', 'caregiverUid', 'role', 'status',
+          'createdAt', 'expiresAt', 'acceptedAt', 'revokedAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'profileId', 'caregiverUid', 'role', 'status',
+          'createdAt', 'expiresAt', 'acceptedAt', 'revokedAt', 'updatedAt'
+        ])
+        && data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128
+        && data.profileId is string && data.profileId.size() > 0 && data.profileId.size() <= 128
+        && (data.caregiverUid == null || (data.caregiverUid is string && data.caregiverUid.size() > 0 && data.caregiverUid.size() <= 128))
+        && data.role == 'READ_ONLY_CAREGIVER'
+        && data.status in ['PENDING', 'ACTIVE', 'REVOKED']
+        && data.createdAt is timestamp
+        && data.expiresAt is timestamp
+        && (data.acceptedAt == null || data.acceptedAt is timestamp)
+        && (data.revokedAt == null || data.revokedAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function referencedProfileIsActive(profileId, ownerUid) {
+      return exists(/databases/$(database)/documents/profiles/$(profileId))
+        && get(/databases/$(database)/documents/profiles/$(profileId)).data.ownerUid == ownerUid
+        && get(/databases/$(database)/documents/profiles/$(profileId)).data.isActive == true;
+    }
+
+    function caregiverAccessIdentityIsUnchanged() {
+      return request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.profileId == resource.data.profileId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.expiresAt == resource.data.expiresAt;
+    }
+
+    function ownerCanReadCaregiverAccess() {
+      return signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    function activeCaregiverCanReadOwnAccess() {
+      return signedIn()
+        && resource.data.status == 'ACTIVE'
+        && resource.data.caregiverUid == request.auth.uid;
+    }
+
+    function isValidCaregiverAcceptance() {
+      return caregiverAccessHasValidShape(request.resource.data)
+        && caregiverAccessIdentityIsUnchanged()
+        && resource.data.status == 'PENDING'
+        && request.resource.data.status == 'ACTIVE'
+        && resource.data.caregiverUid == null
+        && request.resource.data.caregiverUid == request.auth.uid
+        && request.auth.uid != resource.data.ownerUid
+        && resource.data.expiresAt > request.time
+        && resource.data.acceptedAt == null
+        && request.resource.data.acceptedAt == request.time
+        && resource.data.revokedAt == null
+        && request.resource.data.revokedAt == null
+        && request.resource.data.updatedAt == request.time
+        && referencedProfileIsActive(resource.data.profileId, resource.data.ownerUid);
+    }
+
+    function isValidCaregiverRevocation() {
+      return caregiverAccessHasValidShape(request.resource.data)
+        && caregiverAccessIdentityIsUnchanged()
+        && resource.data.status in ['PENDING', 'ACTIVE']
+        && request.resource.data.status == 'REVOKED'
+        && (resource.data.ownerUid == request.auth.uid
+          || (resource.data.status == 'ACTIVE' && resource.data.caregiverUid == request.auth.uid))
+        && request.resource.data.caregiverUid == resource.data.caregiverUid
+        && request.resource.data.acceptedAt == resource.data.acceptedAt
+        && resource.data.revokedAt == null
+        && request.resource.data.revokedAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
     // Account metadata has no medication data. Owners can read and maintain only their own document.
     match /accounts/{uid} {
       allow create: if ownAccount(uid) && request.resource.data.uid == request.auth.uid;
@@ -22,6 +101,40 @@ service cloud.firestore {
       allow update: if signedIn()
         && resource.data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if false;
+    }
+
+    // A high-entropy Firestore document ID is the invitation capability. A
+    // signed-in user may fetch one exact PENDING document for acceptance, but
+    // list is intentionally denied for PENDING invitations to prevent guessing
+    // or enumeration. ACTIVE access authorizes metadata only - never /profiles
+    // or local medication data in this cycle.
+    match /profileAccess/{accessId} {
+      allow create: if signedIn()
+        && caregiverAccessHasValidShape(request.resource.data)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.caregiverUid == null
+        && request.resource.data.role == 'READ_ONLY_CAREGIVER'
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.acceptedAt == null
+        && request.resource.data.revokedAt == null
+        // The app writes exactly seven local days. The rule permits no more
+        // than seven server days, so a client cannot extend an invite.
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(7, 'd')
+        && referencedProfileIsActive(request.resource.data.profileId, request.auth.uid);
+
+      allow get: if ownerCanReadCaregiverAccess()
+        || activeCaregiverCanReadOwnAccess()
+        || (signedIn() && resource.data.status == 'PENDING');
+
+      allow list: if ownerCanReadCaregiverAccess() || activeCaregiverCanReadOwnAccess();
+
+      allow update: if signedIn()
+        && (isValidCaregiverAcceptance() || isValidCaregiverRevocation());
+
       allow delete: if false;
     }
   }
