@@ -31,9 +31,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#FBF4E9",
+          "image": "./assets/brand/runtime/ui/Simplified standalone brand symbol/mpp-symbol-simple- 1024 x 1024.png",
+          "imageWidth": 128,
+          "dark": {
+            "backgroundColor": "#14211E",
+            "image": "./assets/brand/runtime/ui/Simplified standalone brand symbol/mpp-symbol-simple- 1024 x 1024.png"
+          }
         }
       ],
       "expo-sqlite",

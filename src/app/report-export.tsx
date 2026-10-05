@@ -156,14 +156,13 @@ export default function ReportExportScreen() {
 
   return <>
   <ScrollView contentContainerStyle={styles.page}>
-    <Text accessibilityRole="header" style={styles.title}>Doctor / caregiver report</Text>
     <Text style={styles.subtitle}>Create a factual summary from medication and intake records stored in Mr. Pill Pal. This report does not provide medical advice.</Text>
 
     <Text style={styles.sectionLabel}>Period</Text>
     <View style={styles.chips}>{presets.map((item) => <ThemedChip key={item.value} label={item.label} selected={preset === item.value} onPress={() => changePreset(item.value)} accessibilityLabel={`${item.label} report period${preset === item.value ? ", selected" : ""}`} />)}</View>
 
     {isLoading && !report ? <ActivityIndicator size="large" style={styles.loader} /> : null}
-    {error ? <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorTitle}>{error}</Text>{canRetryLoad ? <Pressable accessibilityRole="button" accessibilityLabel="Try loading the report again" onPress={() => load()} style={styles.retryButton}><Text style={styles.errorHint}>Try loading again</Text></Pressable> : null}</View> : null}
+    {error ? <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorTitle}>{error}</Text>{canRetryLoad ? <ThemedButton label="Try again" size="compact" tone="outline" accessibilityLabel="Try loading the report again" onPress={() => load()} style={{ alignSelf: "flex-start" }} /> : null}</View> : null}
 
     {report ? <>
       <ThemedCard style={styles.card}>
@@ -198,7 +197,7 @@ export default function ReportExportScreen() {
       </ThemedCard>)}
 
       <ThemedCard style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy note</Text><Text style={styles.helper}>This report may contain personal medication information. Share it only with people you trust.</Text></ThemedCard>
-      <ThemedButton label={shareOperation === "pdf" ? "Preparing PDF…" : "Share report"} onPress={openShareChooser} loading={Boolean(shareOperation)} disabled={isLoading || Boolean(shareOperation)} accessibilityLabel="Share doctor or caregiver report" style={styles.shareButton} />
+      <ThemedButton label="Share report" loadingLabel={shareOperation === "pdf" ? "Preparing PDF…" : "Preparing report…"} onPress={openShareChooser} loading={Boolean(shareOperation)} disabled={isLoading || Boolean(shareOperation)} accessibilityLabel="Share doctor or caregiver report" style={styles.shareButton} />
     </> : null}
   </ScrollView>
   <Modal visible={isShareChooserVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setIsShareChooserVisible(false)}>
@@ -225,15 +224,12 @@ function ReportDetail({ label, value }: { label: string; value: string }) {
 
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   page: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 120, backgroundColor: colors.background },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: "700", color: colors.textPrimary },
   subtitle: { marginTop: 10, fontSize: 16, lineHeight: 23, color: colors.textSecondary },
   sectionLabel: { marginTop: ui.spacing.section, fontSize: 16, fontWeight: "700", color: colors.textPrimary },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   loader: { marginTop: 48 },
   error: { marginTop: ui.spacing.section, padding: ui.spacing.card, borderRadius: ui.radius.card, backgroundColor: colors.dangerBackground },
   errorTitle: { fontSize: 16, fontWeight: "700", color: colors.dangerForeground },
-  errorHint: { marginTop: 5, color: colors.textMuted },
-  retryButton: { minHeight: ui.touch.minimum, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 4 },
   card: { marginTop: ui.spacing.section },
   cardTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
   detail: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 14, borderBottomWidth: 1, borderBottomColor: colors.divider },

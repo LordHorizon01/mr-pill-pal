@@ -8,7 +8,7 @@ import { useAppTheme } from "@/components/app-theme-provider";
 import { getProfileDisplayName } from "@/features/profiles/profile.domain";
 import { ProfileRelationship } from "@/features/profiles/profile.types";
 import { useProfileStore } from "@/state/profile.store";
-import { ThemedChip } from "@/components/themed-ui";
+import { ThemedButton, ThemedChip } from "@/components/themed-ui";
 
 const relationships: ProfileRelationship[] = ["Self", "Mother", "Father", "Child", "Spouse", "Family member", "Other"];
 
@@ -26,7 +26,61 @@ export default function ProfilesScreen() {
   const requestCancel = () => { if (!adding || !hasUnsavedChanges()) { resetForm(); return; } Alert.alert("Discard profile?", "Your entered information has not been saved.", [{ text: "Keep editing", style: "cancel" }, { text: "Discard", style: "destructive", onPress: resetForm }]); };
   const dateValue = dateOfBirth ? localDateFromString(dateOfBirth) : new Date(2000, 0, 1, 12);
   const onDateChange = (_event: DateTimePickerChangeEvent, value?: Date) => { if (value) setDateOfBirth(toLocalDateString(value)); setShowDatePicker(false); };
-  return <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled"><AppBackHeader title="Profiles" onBack={leaveProfiles} fallbackRoute="/settings" /><Text style={styles.intro}>Choose whose medication routine you are viewing. Profile data and local medication records stay separate.</Text>{profiles.filter((profile) => profile.isActive).map((profile) => <View key={profile.id} style={[styles.card, selected === profile.id && styles.selected]}><View style={styles.copy}><Text style={styles.name}>{getProfileDisplayName(profile)}</Text><Text style={styles.meta}>{profile.relationship} · {profile.role === "SELF" ? "My profile" : "Dependent profile"}</Text>{selected === profile.id ? <Text style={styles.current}>Current profile</Text> : null}</View>{selected === profile.id ? null : <Pressable accessibilityRole="button" accessibilityLabel={`Switch to ${getProfileDisplayName(profile)}`} onPress={() => void select(profile.id)} style={styles.outline}><Text style={styles.outlineText}>Switch</Text></Pressable>}<Pressable accessibilityRole="button" accessibilityLabel={`Edit ${getProfileDisplayName(profile)}`} onPress={() => edit(profile)} style={styles.textButton}><Text style={styles.editText}>Edit</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`Deactivate ${getProfileDisplayName(profile)}`} disabled={profiles.filter((item) => item.isActive).length <= 1 || saving} onPress={() => Alert.alert("Deactivate profile?", `${getProfileDisplayName(profile)} will no longer receive future reminders. Existing medication and history are kept.`, [{ text: "Cancel", style: "cancel" }, { text: "Deactivate", style: "destructive", onPress: () => void deactivate(profile.id).catch(() => undefined) }])} style={[styles.textButton, profiles.filter((item) => item.isActive).length <= 1 && styles.disabled]}><Text style={styles.textButtonText}>Deactivate</Text></Pressable></View>)}{!adding ? <Pressable accessibilityRole="button" accessibilityLabel="Add a profile" onPress={() => setAdding(true)} style={styles.primary}><Text style={styles.primaryText}>Add profile</Text></Pressable> : <View style={styles.form}><Text accessibilityRole="header" style={styles.formTitle}>{editingId ? "Edit profile" : "Add a profile"}</Text><Text style={styles.formIntro}>{editingId ? "Update this medication profile." : "Create a separate medication profile for yourself or a family member."}</Text><Text style={styles.label}>Full name *</Text><TextInput accessibilityLabel="Profile full name" value={name} onChangeText={setName} placeholder="e.g. Rajesh Nigam" placeholderTextColor={colors.placeholder} autoCapitalize="words" style={styles.input} /><Text style={styles.helper}>Enter the person's full name.</Text><Text style={styles.label}>Nickname (optional)</Text><TextInput accessibilityLabel="Profile nickname" value={nickname} onChangeText={setNickname} placeholder="e.g. Papa" placeholderTextColor={colors.placeholder} autoCapitalize="words" style={styles.input} /><Text style={styles.helper}>This can be used in greetings and reminders.</Text><Text style={styles.label}>Date of birth *</Text><Pressable accessibilityRole="button" accessibilityLabel={`Date of birth: ${dateOfBirth || "not selected"}`} onPress={() => setShowDatePicker(true)} style={styles.dateInput}><Text style={dateOfBirth ? styles.dateValue : styles.datePlaceholder}>{dateOfBirth || "YYYY-MM-DD"}</Text><Text style={styles.dateAction}>Choose date</Text></Pressable>{showDatePicker ? <DateTimePicker value={dateValue} mode="date" maximumDate={new Date()} onValueChange={onDateChange} onDismiss={() => setShowDatePicker(false)} /> : null}<Text style={styles.helper}>Used only for profile information. Mr. Pill Pal does not provide medical advice based on age.</Text><Text style={styles.label}>Relationship</Text><Text style={styles.helper}>How this person is related to the account owner.</Text><View style={styles.chips}>{relationships.map((item) => <ThemedChip key={item} label={item} selected={item === relationship} disabled={saving} onPress={() => setRelationship(item)} accessibilityLabel={`${item} relationship${item === relationship ? ", selected" : ""}`} />)}</View>{error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}<View style={styles.formActions}><Pressable accessibilityRole="button" accessibilityLabel="Cancel profile editing" disabled={saving} onPress={requestCancel} style={[styles.cancelButton, saving && styles.disabled]}><Text style={styles.cancelText}>Cancel</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={editingId ? "Save profile changes" : "Save profile"} accessibilityState={{ busy: saving, disabled: saving }} disabled={saving} onPress={() => void save()} style={[styles.primary, styles.saveButton, saving && styles.disabled]}><Text style={styles.primaryText}>{saving ? "Saving..." : editingId ? "Save changes" : "Save profile"}</Text></Pressable></View></View>}</ScrollView>;
+  return (
+    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <AppBackHeader title="Profiles" onBack={leaveProfiles} fallbackRoute="/settings" />
+      <Text style={styles.intro}>Choose whose medication routine you are viewing. Profile data and local medication records stay separate.</Text>
+      {profiles.filter((profile) => profile.isActive).map((profile) => (
+        <View key={profile.id} style={[styles.card, selected === profile.id && styles.selected]}>
+          <View style={styles.copy}>
+            <Text style={styles.name}>{getProfileDisplayName(profile)}</Text>
+            <Text style={styles.meta}>{profile.relationship} · {profile.role === "SELF" ? "My profile" : "Dependent profile"}</Text>
+            {selected === profile.id ? <Text style={styles.current}>Current profile</Text> : null}
+          </View>
+          {selected === profile.id ? null : <ThemedButton size="compact" tone="outline" label="Switch" accessibilityLabel={`Switch to ${getProfileDisplayName(profile)}`} onPress={() => void select(profile.id)} />}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: ui.spacing.xs, marginTop: ui.spacing.xs }}>
+            <ThemedButton size="compact" tone="outline" label="Edit" accessibilityLabel={`Edit ${getProfileDisplayName(profile)}`} onPress={() => edit(profile)} />
+            <ThemedButton
+              size="compact"
+              tone="danger"
+              label="Deactivate"
+              accessibilityLabel={`Deactivate ${getProfileDisplayName(profile)}`}
+              disabled={profiles.filter((item) => item.isActive).length <= 1 || saving}
+              onPress={() => Alert.alert("Deactivate profile?", `${getProfileDisplayName(profile)} will no longer receive future reminders. Existing medication and history are kept.`, [
+                { text: "Cancel", style: "cancel" },
+                { text: "Deactivate", style: "destructive", onPress: () => void deactivate(profile.id).catch(() => undefined) },
+              ])}
+            />
+          </View>
+        </View>
+      ))}
+      {!adding ? <ThemedButton label="Add profile" accessibilityLabel="Add a profile" onPress={() => setAdding(true)} style={styles.primary} /> : <View style={styles.form}>
+        <Text accessibilityRole="header" style={styles.formTitle}>{editingId ? "Edit profile" : "Add a profile"}</Text>
+        <Text style={styles.formIntro}>{editingId ? "Update this medication profile." : "Create a separate medication profile for yourself or a family member."}</Text>
+        <Text style={styles.label}>Full name *</Text>
+        <TextInput accessibilityLabel="Profile full name" value={name} onChangeText={setName} placeholder="e.g. Rajesh Nigam" placeholderTextColor={colors.placeholder} autoCapitalize="words" style={styles.input} />
+        <Text style={styles.helper}>Enter the person's full name.</Text>
+        <Text style={styles.label}>Nickname (optional)</Text>
+        <TextInput accessibilityLabel="Profile nickname" value={nickname} onChangeText={setNickname} placeholder="e.g. Papa" placeholderTextColor={colors.placeholder} autoCapitalize="words" style={styles.input} />
+        <Text style={styles.helper}>This can be used in greetings and reminders.</Text>
+        <Text style={styles.label}>Date of birth *</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Date of birth: ${dateOfBirth || "not selected"}`} onPress={() => setShowDatePicker(true)} style={styles.dateInput}>
+          <Text style={dateOfBirth ? styles.dateValue : styles.datePlaceholder}>{dateOfBirth || "YYYY-MM-DD"}</Text>
+          <Text style={styles.dateAction}>Choose date</Text>
+        </Pressable>
+        {showDatePicker ? <DateTimePicker value={dateValue} mode="date" maximumDate={new Date()} onValueChange={onDateChange} onDismiss={() => setShowDatePicker(false)} /> : null}
+        <Text style={styles.helper}>Used only for profile information. Mr. Pill Pal does not provide medical advice based on age.</Text>
+        <Text style={styles.label}>Relationship</Text>
+        <Text style={styles.helper}>How this person is related to the account owner.</Text>
+        <View style={styles.chips}>{relationships.map((item) => <ThemedChip key={item} label={item} selected={item === relationship} disabled={saving} onPress={() => setRelationship(item)} accessibilityLabel={`${item} relationship${item === relationship ? ", selected" : ""}`} />)}</View>
+        {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+        <View style={styles.formActions}>
+          <ThemedButton label="Cancel" tone="outline" accessibilityLabel="Cancel profile editing" disabled={saving} onPress={requestCancel} style={[styles.cancelButton, saving && styles.disabled]} />
+          <ThemedButton label={editingId ? "Save changes" : "Save profile"} loadingLabel="Saving..." accessibilityLabel={editingId ? "Save profile changes" : "Save profile"} loading={saving} disabled={saving} onPress={() => void save()} style={[styles.primary, styles.saveButton]} />
+        </View>
+      </View>}
+    </ScrollView>
+  );
 }
 
 function toLocalDateString(value: Date): string { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; }

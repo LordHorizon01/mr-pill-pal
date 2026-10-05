@@ -22,6 +22,8 @@ const medicationLoadGuard = createAsyncRequestGuard();
 
 interface MedicationState {
   profileId: string | null;
+  loadedProfileId: string | null;
+  loadedFilter: MedicationListFilter | null;
   medications: Medication[];
   isLoading: boolean;
   error: string | null;
@@ -47,6 +49,8 @@ interface MedicationState {
 
 export const useMedicationStore = create<MedicationState>((set) => ({
   profileId: null,
+  loadedProfileId: null,
+  loadedFilter: null,
   medications: [],
   isLoading: false,
   error: null,
@@ -54,7 +58,7 @@ export const useMedicationStore = create<MedicationState>((set) => ({
   loadMedications: async (filter = "active") => {
     const requestRevision = medicationLoadGuard.begin();
     const profileId = useMedicationStore.getState().profileId;
-    if (!profileId) { if (medicationLoadGuard.isCurrent(requestRevision)) set({ medications: [], isLoading: false, error: null }); return; }
+    if (!profileId) { if (medicationLoadGuard.isCurrent(requestRevision)) set({ medications: [], loadedProfileId: null, loadedFilter: null, isLoading: false, error: null }); return; }
     set({
       isLoading: true,
       error: null,
@@ -66,6 +70,8 @@ export const useMedicationStore = create<MedicationState>((set) => ({
 
       set({
         medications,
+        loadedProfileId: profileId,
+        loadedFilter: filter,
         isLoading: false,
       });
     } catch (error) {
@@ -178,5 +184,5 @@ export const useMedicationStore = create<MedicationState>((set) => ({
   clearError: () => {
     set({ error: null });
   },
-  setProfile: (profileId) => { medicationLoadGuard.invalidate(); set({ profileId, medications: [], error: null, isLoading: false }); },
+  setProfile: (profileId) => { medicationLoadGuard.invalidate(); set({ profileId, loadedProfileId: null, loadedFilter: null, medications: [], error: null, isLoading: false }); },
 }));

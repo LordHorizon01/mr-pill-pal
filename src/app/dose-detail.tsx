@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { getHistoryDetail } from "@/features/history/history.service";
 import { HistoryDose } from "@/features/history/history.types";
@@ -7,6 +7,7 @@ import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
 import { AppBackHeader } from "@/components/app-back-header";
+import { ThemedButton } from "@/components/themed-ui";
 
 export default function DoseDetailScreen() {
   const { colors } = useAppTheme();
@@ -31,7 +32,7 @@ export default function DoseDetailScreen() {
     return () => { current = false; };
   }, [id, profileId]);
   useEffect(() => loadDose(), [loadDose]);
-  if (!dose) return <View style={styles.page}><AppBackHeader title="Dose details" fallbackRoute="/history" />{error ? <Pressable accessibilityRole="button" accessibilityLabel="Try loading dose details again" onPress={() => void loadDose()} style={styles.error}><Text style={styles.errorText}>{error}</Text><Text style={styles.errorHint}>Tap to try again</Text></Pressable> : <ActivityIndicator size="large" style={styles.loader} />}</View>;
+  if (!dose) return <View style={styles.page}><AppBackHeader title="Dose details" fallbackRoute="/history" />{error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text><ThemedButton label="Try again" size="compact" tone="outline" accessibilityLabel="Try loading dose details again" onPress={() => void loadDose()} /></View> : <ActivityIndicator size="large" style={styles.loader} />}</View>;
   return <View style={styles.page}><AppBackHeader title="Dose details" fallbackRoute="/history" /><Text style={styles.name}>{dose.medicationName}</Text><Text style={styles.dosage}>{dose.medicationDosage}</Text><View style={styles.card}><Detail label="Scheduled date" value={dose.scheduledDate} /><Detail label="Scheduled time" value={dose.scheduledTime} /><Detail label="Status" value={dose.status[0].toUpperCase() + dose.status.slice(1)} />{dose.takenAt ? <Detail label="Recorded" value={new Date(dose.takenAt).toLocaleString()} /> : null}{dose.notes ? <Detail label="Notes" value={dose.notes} /> : null}</View></View>;
 }
 function Detail({ label, value }: { label: string; value: string }) { const { colors } = useAppTheme(); const styles = createStyles(colors); return <View style={styles.detail}><Text style={styles.label}>{label}</Text><Text style={styles.value}>{value}</Text></View>; }

@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextStyle, View, ViewStyle } from "react-native";
+import { Pressable, StyleSheet, Text, TextStyle, View, ViewStyle, type PressableStateCallbackType, type StyleProp } from "react-native";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
-import { useAppTheme } from "@/components/app-theme-provider";
-import { AppColorTokens, ui } from "@/components/ui-tokens";
+import { useAppTheme, useAppThemeColorStyle } from "@/components/app-theme-provider";
+import { motion } from "@/components/motion-tokens";
+import { AppColorTokens, getButtonColorRoles, ui } from "@/components/ui-tokens";
 
 export type BadgeTone = "taken" | "skipped" | "missed" | "pending" | "upcoming" | "active" | "paused" | "expired";
 export type ButtonTone = "primary" | "secondary" | "outline" | "danger";
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const AnimatedText = Animated.createAnimatedComponent(Text);
 
 const badgeColorKeys: Record<BadgeTone, readonly [keyof AppColorTokens, keyof AppColorTokens]> = {
   taken: ["badgeTakenBackground", "badgeTakenForeground"],
@@ -23,46 +27,97 @@ export function ThemedChip({ label, selected = false, onPress, accessibilityLabe
 }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={onPress} style={[styles.chip, selected && styles.chipSelected, disabled && styles.disabled, style]}><Text numberOfLines={1} style={[styles.chipText, selected && styles.chipTextSelected, textStyle]}>{label}</Text></Pressable>;
+  return <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel ?? label}
+    accessibilityState={{ selected, disabled }}
+    disabled={disabled}
+    onPress={onPress}
+    style={(state: PressableStateCallbackType) => [styles.chip, style, selected && styles.chipSelected, disabled && styles.chipDisabled, state.pressed && !disabled && (selected ? styles.chipSelectedPressed : styles.chipPressed)]}
+  >
+    {(state: PressableStateCallbackType) => <Text numberOfLines={1} style={[styles.chipText, textStyle, selected && styles.chipTextSelected, disabled && styles.chipTextDisabled, state.pressed && !disabled && (selected ? styles.chipTextSelectedPressed : styles.chipTextPressed)]}>{label}</Text>}
+  </Pressable>;
 }
 
 export function StatusBadge({ label, tone, style, textStyle }: { label: string; tone: BadgeTone; style?: ViewStyle; textStyle?: TextStyle }) {
   const { colors } = useAppTheme();
   const [backgroundKey, foregroundKey] = badgeColorKeys[tone];
   const styles = createStyles(colors);
-  return <View accessibilityRole="text" accessibilityLabel={`Status: ${label}`} style={[styles.badge, { backgroundColor: colors[backgroundKey] }, style]}><Text style={[styles.badgeText, { color: colors[foregroundKey] }, textStyle]}>{label}</Text></View>;
+  const animatedSurface = useAppThemeColorStyle({ backgroundColor: backgroundKey });
+  const animatedText = useAppThemeColorStyle({ color: foregroundKey });
+  return <Animated.View accessibilityRole="text" accessibilityLabel={`Status: ${label}`} style={[styles.badge, { backgroundColor: colors[backgroundKey] }, style, animatedSurface]}><AnimatedText style={[styles.badgeText, { color: colors[foregroundKey] }, textStyle, animatedText]}>{label}</AnimatedText></Animated.View>;
 }
 
-export function ThemedButton({ label, onPress, tone = "primary", disabled = false, loading = false, accessibilityLabel, style, textStyle }: {
-  label: string; onPress: () => void; tone?: ButtonTone; disabled?: boolean; loading?: boolean; accessibilityLabel?: string; style?: ViewStyle; textStyle?: TextStyle;
+export function ThemedButton({ label, onPress, tone = "primary", size = "regular", disabled = false, loading = false, loadingLabel, accessibilityLabel, style, textStyle }: {
+  label: string; onPress: () => void; tone?: ButtonTone; size?: "regular" | "compact"; disabled?: boolean; loading?: boolean; loadingLabel?: string; accessibilityLabel?: string; style?: StyleProp<ViewStyle>; textStyle?: TextStyle;
 }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  const buttonStyle = tone === "primary" ? styles.primaryButton : tone === "secondary" ? styles.secondaryButton : tone === "danger" ? styles.dangerButton : styles.outlineButton;
-  const labelStyle = tone === "primary" ? styles.primaryButtonText : tone === "secondary" ? styles.secondaryButtonText : tone === "danger" ? styles.dangerButtonText : styles.outlineButtonText;
-  const spinnerColor = tone === "primary" ? colors.primaryForeground : tone === "danger" ? colors.dangerForeground : colors.outlineForeground;
-  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} accessibilityState={{ disabled, busy: loading }} disabled={disabled || loading} onPress={onPress} style={[styles.button, buttonStyle, (disabled || loading) && styles.disabled, style]}>{loading ? <ActivityIndicator color={spinnerColor} /> : null}<Text style={[styles.buttonText, labelStyle, textStyle]}>{label}</Text></Pressable>;
+  const statusLabel = loading ? loadingLabel ?? label : label;
+  const sizingLabel = loadingLabel && loadingLabel.length > label.length ? loadingLabel : label;
+  const isUnavailable = disabled || loading;
+  const pressProgress = useSharedValue(0);
+  const pressStyle = useAnimatedStyle(() => ({ opacity: 1 - pressProgress.value * 0.14 }));
+  return <AnimatedPressable
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel ?? statusLabel}
+    accessibilityState={{ disabled: isUnavailable, busy: loading }}
+    disabled={isUnavailable}
+    onPressIn={() => { pressProgress.value = withTiming(1, { duration: motion.duration.feedback, easing: Easing.bezier(...motion.easing.standard) }); }}
+    onPressOut={() => { pressProgress.value = withTiming(0, { duration: motion.duration.feedback, easing: Easing.bezier(...motion.easing.standard) }); }}
+    onPress={onPress}
+    style={(state: PressableStateCallbackType) => {
+      const colorState = isUnavailable ? "disabled" : state.pressed ? "pressed" : "default";
+      const roles = getButtonColorRoles(tone, colorState);
+      return [
+        styles.button,
+        size === "compact" && styles.compactButton,
+        tone !== "primary" && styles.borderedButton,
+        isUnavailable && styles.disabled,
+        style,
+        pressStyle,
+        { backgroundColor: colors[roles.background], borderColor: colors[roles.border] },
+      ];
+    }}
+  >
+    {(state: PressableStateCallbackType) => {
+      const colorState = isUnavailable ? "disabled" : state.pressed ? "pressed" : "default";
+      const roles = getButtonColorRoles(tone, colorState);
+      return <View style={styles.buttonLabelSlot}>
+        <Text accessible={false} style={[styles.buttonText, textStyle, styles.buttonLabelSizer]}>{sizingLabel}</Text>
+        <AnimatedText accessible={false} style={[styles.buttonText, styles.buttonLabelOverlay, textStyle, { color: colors[roles.foreground] }]}>{statusLabel}</AnimatedText>
+      </View>;
+    }}
+  </AnimatedPressable>;
 }
 
 export function ThemedCard({ children, style }: { children: ReactNode; style?: ViewStyle }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
-  return <View style={[styles.card, style]}>{children}</View>;
+  const animatedSurface = useAppThemeColorStyle({ backgroundColor: "surfaceRaised", borderColor: "border" });
+  return <Animated.View style={[styles.card, style, animatedSurface]}>{children}</Animated.View>;
 }
 
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
-  chip: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.chip, backgroundColor: colors.inputBackground },
-  chipSelected: { borderColor: colors.selectedBackground, backgroundColor: colors.selectedBackground },
-  chipText: { fontWeight: "700", color: colors.inputForeground },
-  chipTextSelected: { color: colors.selectedForeground },
+  chip: { minHeight: ui.touch.minimum, justifyContent: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: colors.chipBorder, borderRadius: ui.radius.chip, backgroundColor: colors.chipBackground },
+  chipSelected: { borderColor: colors.chipSelectedBackground, backgroundColor: colors.chipSelectedBackground },
+  chipPressed: { borderColor: colors.chipPressedBackground, backgroundColor: colors.chipPressedBackground },
+  chipSelectedPressed: { borderColor: colors.chipSelectedPressedBackground, backgroundColor: colors.chipSelectedPressedBackground },
+  chipDisabled: { borderColor: colors.chipDisabledBorder, backgroundColor: colors.chipDisabledBackground },
+  chipText: { ...ui.typography.label, color: colors.chipForeground },
+  chipTextSelected: { color: colors.chipSelectedForeground },
+  chipTextPressed: { color: colors.chipPressedForeground },
+  chipTextSelectedPressed: { color: colors.chipSelectedPressedForeground },
+  chipTextDisabled: { color: colors.chipDisabledForeground },
   badge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: ui.radius.chip },
-  badgeText: { fontSize: 14, fontWeight: "800" },
+  badgeText: ui.typography.label,
   button: { minHeight: ui.touch.minimum, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 16, borderRadius: ui.radius.button },
-  buttonText: { fontSize: 16, fontWeight: "800" },
-  primaryButton: { backgroundColor: colors.primaryBackground }, primaryButtonText: { color: colors.primaryForeground },
-  secondaryButton: { backgroundColor: colors.secondaryBackground }, secondaryButtonText: { color: colors.secondaryForeground },
-  outlineButton: { borderWidth: 1, borderColor: colors.outlineBorder, backgroundColor: colors.inputBackground }, outlineButtonText: { color: colors.outlineForeground },
-  dangerButton: { backgroundColor: colors.dangerBackground }, dangerButtonText: { color: colors.dangerForeground },
-  card: { padding: ui.spacing.card, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
-  disabled: { opacity: 0.5 },
+  compactButton: { minHeight: 44, paddingHorizontal: 12 },
+  borderedButton: { borderWidth: 1 },
+  buttonText: ui.typography.button,
+  buttonLabelSlot: { position: "relative", alignItems: "center", justifyContent: "center" },
+  buttonLabelSizer: { opacity: 0 },
+  buttonLabelOverlay: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, textAlign: "center", textAlignVertical: "center" },
+  card: { padding: ui.spacing.card, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.surfaceRaised, elevation: ui.elevation.card },
+  disabled: { borderWidth: 1 },
 });

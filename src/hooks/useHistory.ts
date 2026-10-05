@@ -4,6 +4,7 @@ import { useHistoryStore } from "@/state/history.store";
 export function useHistory() {
   return {
     doses: useHistoryStore((state) => state.doses),
+    loadedQueryKey: useHistoryStore((state) => state.loadedQueryKey),
     isLoading: useHistoryStore((state) => state.isLoading),
     deletingDoseId: useHistoryStore((state) => state.deletingDoseId),
     error: useHistoryStore((state) => state.error),

@@ -7,6 +7,11 @@ import { DoseStatus } from "@/features/doses/dose.types";
 const MEDICATION_CHANNEL_ID = "medication-reminders-v3";
 const PRIVATE_REMINDER_BODY = "It is time for a medication reminder.";
 
+export type PrimerNotificationPermission = {
+  status: "not_requested" | "granted" | "denied";
+  canAskAgain: boolean;
+};
+
 export class NotificationPermissionError extends Error {
   constructor() {
     super("Notifications are disabled. Enable notifications, then try again.");
@@ -54,6 +59,33 @@ export async function hasNotificationPermission(): Promise<boolean> {
   const permission = await Notifications.getPermissionsAsync();
 
   return permission.status === "granted";
+}
+
+/** Read the OS permission without displaying a prompt or changing reminder scheduling. */
+export async function getPrimerNotificationPermission(): Promise<PrimerNotificationPermission> {
+  const permission = await Notifications.getPermissionsAsync();
+  return {
+    status: permission.granted || permission.status === "granted"
+      ? "granted"
+      : permission.status === "undetermined"
+        ? "not_requested"
+        : "denied",
+    canAskAgain: permission.canAskAgain,
+  };
+}
+
+/** Called only after the user presses Enable reminders on the first-run primer. */
+export async function requestPrimerNotificationPermission(): Promise<PrimerNotificationPermission> {
+  await ensureMedicationNotificationChannel();
+  const permission = await Notifications.requestPermissionsAsync();
+  return {
+    status: permission.granted || permission.status === "granted"
+      ? "granted"
+      : permission.status === "undetermined"
+        ? "not_requested"
+        : "denied",
+    canAskAgain: permission.canAskAgain,
+  };
 }
 
 export async function initializeNotifications(): Promise<boolean> {
