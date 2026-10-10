@@ -12,7 +12,7 @@ const RELATIONSHIPS: readonly ProfileRelationship[] = [
 export function normalizeProfileInput(input: CreateProfileInput): CreateProfileInput {
   const fullName = input.fullName.trim().replace(/\s+/g, " ");
   const nickname = input.nickname?.trim().replace(/\s+/g, " ") || undefined;
-  const dateOfBirth = input.dateOfBirth.trim();
+  const dateOfBirth = input.dateOfBirth?.trim() ?? "";
 
   if (!fullName || fullName.length > 100) {
     throw new Error("Enter a full name of 100 characters or fewer.");
@@ -22,6 +22,9 @@ export function normalizeProfileInput(input: CreateProfileInput): CreateProfileI
   }
   if (!RELATIONSHIPS.includes(input.relationship)) {
     throw new Error("Choose a valid relationship.");
+  }
+  if (!dateOfBirth) {
+    return { ...input, fullName, nickname, dateOfBirth: "", medicalDetails: normalizeMedicalDetails(input.medicalDetails) };
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
     throw new Error("Enter the date of birth as a valid date.");

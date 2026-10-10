@@ -30,15 +30,69 @@ export type AccountDocumentDraft = {
   displayName: string | null;
   onboardingComplete: boolean;
   profileSetupComplete: boolean;
+  profileSetupState: AccountProfileSetupState;
+  profileSetupDraft: AccountProfileSetupDraft;
 };
+
+export type AccountProfileSetupState = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+export type AccountProfileGender = "woman" | "man" | "nonbinary" | "prefer_not_to_say" | "other";
+export type AccountProfileSetupStep = AccountProfileSetupDraft["activeStep"];
+export type AccountProfileType = "me" | "care_for";
+export type AccountProfileRelationship = "parent" | "partner" | "child" | "relative" | "friend" | "other";
+export type AccountReminderPreference = "sound_vibration" | "sound" | "vibration" | "quiet";
+
+export type AccountProfileSetupDraft = {
+  displayName: string | null;
+  gender: AccountProfileGender | null;
+  genderOther: string | null;
+  dateOfBirth: string | null;
+  avatarUri: string | null;
+  avatarPreset: string | null;
+  profileType: AccountProfileType | null;
+  relationship: AccountProfileRelationship | null;
+  relationshipOther: string | null;
+  reminderPreference: AccountReminderPreference | null;
+  activeStep: "name" | "gender" | "dob" | "avatar" | "profileType" | "relationship" | "reminder" | "review" | "handoff";
+};
+
+export const DOB_MIN_YEAR = 1900;
+
+/** Month uses the familiar 1-12 calendar convention. */
+export function getDobDaysInMonth(year: number, month: number): number {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return 0;
+  return new Date(year, month, 0).getDate();
+}
+
+export function clampDobDay(year: number, month: number, day: number): number {
+  const lastDay = getDobDaysInMonth(year, month);
+  if (!lastDay) return 1;
+  return Math.min(Math.max(Math.trunc(day) || 1, 1), lastDay);
+}
+
+export function createDobValue(year: number, month: number, day: number): string {
+  if (year < DOB_MIN_YEAR || month < 1 || month > 12 || day < 1 || day > getDobDaysInMonth(year, month)) {
+    throw new Error("Enter a valid date of birth.");
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** The existing avatarUrl field stores either the local photo URI or a stable bundled-asset key. */
+export function getProfileSetupAvatarUrl(draft: Pick<AccountProfileSetupDraft, "avatarUri" | "avatarPreset" | "gender">): string {
+  if (draft.avatarUri) return draft.avatarUri;
+  if (/^avatar-preset-0[1-8]$/.test(draft.avatarPreset ?? "")) return `preset:${draft.avatarPreset}`;
+  if (draft.gender === "man") return "default:male";
+  if (draft.gender === "woman") return "default:female";
+  return "default:neutral";
+}
 
 export type ProfileDocumentDraft = {
   ownerUid: string;
   fullName: string;
-  dateOfBirth: string;
+  dateOfBirth?: string;
   relationship: Profile["relationship"];
   role: ProfileRole;
   isActive: boolean;
+  avatarUrl?: string;
   nickname?: string;
   medicalDetails?: Profile["medicalDetails"];
 };
@@ -52,7 +106,34 @@ export function buildAccountDocumentDraft(
     displayName: displayName?.trim() || null,
     onboardingComplete: false,
     profileSetupComplete: false,
+    profileSetupState: "NOT_STARTED",
+    profileSetupDraft: {
+      displayName: displayName?.trim() || null,
+      gender: null,
+      genderOther: null,
+      dateOfBirth: null,
+      avatarUri: null,
+      avatarPreset: null,
+      profileType: null,
+      relationship: null,
+      relationshipOther: null,
+      reminderPreference: null,
+      activeStep: "name",
+    },
   };
+}
+
+/** Names skipped profiles consistently without needing a device-only counter. */
+export function nextTemporaryProfileName(existingNames: readonly string[]): string {
+  const usedNumbers = new Set(
+    existingNames
+      .map((name) => /^User\s+(\d+)$/i.exec(name.trim())?.[1])
+      .filter((value): value is string => Boolean(value))
+      .map(Number),
+  );
+  let index = 1;
+  while (usedNumbers.has(index)) index += 1;
+  return `User ${index}`;
 }
 
 /** Builds a Firestore-safe document shape and deliberately omits undefined fields. */
@@ -63,13 +144,14 @@ export function buildProfileDocumentDraft(
   const document: ProfileDocumentDraft = {
     ownerUid,
     fullName: input.fullName,
-    dateOfBirth: input.dateOfBirth,
     relationship: input.relationship,
     role: input.relationship === "Self" ? "SELF" : "DEPENDENT",
     isActive: true,
   };
 
   if (input.nickname) document.nickname = input.nickname;
+  if (input.avatarUrl) document.avatarUrl = input.avatarUrl;
+  if (input.dateOfBirth) document.dateOfBirth = input.dateOfBirth;
   if (input.medicalDetails) document.medicalDetails = input.medicalDetails;
 
   return document;

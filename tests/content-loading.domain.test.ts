@@ -39,9 +39,9 @@ test("scope skeleton is shown only for a delayed new-scope load", () => {
 });
 
 test("tab re-entry uses an opacity-only fade and reduced motion stays short", () => {
-  assert.deepEqual(getTabContentFadeConfig(false), { fromOpacity: 0.88, duration: 300 });
-  assert.deepEqual(getTabContentFadeConfig(true), { fromOpacity: 0.88, duration: 160 });
-  assert.equal(motion.duration.tabContent, 300);
+  assert.deepEqual(getTabContentFadeConfig(false), { fromOpacity: 0.88, duration: 240 });
+  assert.deepEqual(getTabContentFadeConfig(true), { fromOpacity: 0.88, duration: 120 });
+  assert.equal(motion.duration.tabContent, 240);
 });
 
 test("native pull spinner is limited to an active user pull, not focus or foreground refresh", () => {

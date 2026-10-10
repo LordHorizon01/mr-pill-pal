@@ -4,7 +4,11 @@ import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import Constants from "expo-constants";
 import { normalizeEmail, normalizePhoneNumber, toAuthMessage, validateEmailPassword } from "./auth.domain";
 import { buildAccountSignOutPlan } from "./auth-session.domain";
-import { buildAccountDocumentDraft } from "@/features/profiles/profile-setup.domain";
+import {
+  AccountProfileSetupDraft,
+  AccountProfileSetupState,
+  buildAccountDocumentDraft,
+} from "@/features/profiles/profile-setup.domain";
 
 export type AuthUser = auth.User;
 export type GoogleSignInResult = { cancelled: boolean };
@@ -90,6 +94,85 @@ export async function markAccountProfileSetupComplete(accountUid: string): Promi
   await firestore.updateDoc(firestore.doc(firebaseStore(), "accounts", user.uid), {
     profileSetupComplete: true,
     onboardingComplete: true,
+    profileSetupState: "COMPLETED",
+    updatedAt: firestore.serverTimestamp(),
+  });
+}
+
+type FirestoreAccount = {
+  profileSetupComplete?: boolean;
+  profileSetupState?: AccountProfileSetupState;
+  profileSetupDraft?: Partial<AccountProfileSetupDraft>;
+};
+
+export type AccountProfileSetupProgress = {
+  state: AccountProfileSetupState;
+  draft: AccountProfileSetupDraft;
+};
+
+function sanitizeProfileSetupDraft(value: FirestoreAccount["profileSetupDraft"]): AccountProfileSetupDraft {
+  const displayName = typeof value?.displayName === "string" && value.displayName.trim() ? value.displayName.trim() : null;
+  const gender = value?.gender === "woman" || value?.gender === "man" || value?.gender === "nonbinary" || value?.gender === "prefer_not_to_say" || value?.gender === "other" ? value.gender : null;
+  const genderOther = typeof value?.genderOther === "string" && value.genderOther.trim() ? value.genderOther.trim() : null;
+  const profileType = value?.profileType === "me" || value?.profileType === "care_for" ? value.profileType : null;
+  const relationship = ["parent", "partner", "child", "relative", "friend", "other"].includes(String(value?.relationship)) ? value?.relationship ?? null : null;
+  const reminderPreference = ["sound_vibration", "sound", "vibration", "quiet"].includes(String(value?.reminderPreference)) ? value?.reminderPreference ?? null : null;
+  const validSteps = ["name", "gender", "dob", "avatar", "profileType", "relationship", "reminder", "review", "handoff"] as const;
+  return {
+    displayName,
+    gender,
+    genderOther: gender === "other" ? genderOther : null,
+    dateOfBirth: typeof value?.dateOfBirth === "string" ? value.dateOfBirth : null,
+    avatarUri: typeof value?.avatarUri === "string" ? value.avatarUri : null,
+    avatarPreset: typeof value?.avatarPreset === "string" ? value.avatarPreset : null,
+    profileType,
+    relationship,
+    relationshipOther: relationship === "other" && typeof value?.relationshipOther === "string" ? value.relationshipOther : null,
+    reminderPreference,
+    activeStep: validSteps.includes(value?.activeStep as typeof validSteps[number]) ? value?.activeStep as AccountProfileSetupDraft["activeStep"] : "name",
+  };
+}
+
+/**
+ * Reads the account-owned setup gate. Older accounts with a real profile are
+ * migrated to COMPLETED so they are never sent through the new flow again.
+ */
+export async function getAccountProfileSetupProgress(accountUid: string, hasExistingProfile = false): Promise<AccountProfileSetupProgress> {
+  const user = getCurrentAuthenticatedUser(accountUid);
+  await ensureAccountDocument(user);
+  const reference = firestore.doc(firebaseStore(), "accounts", accountUid);
+  const snapshot = await firestore.getDoc(reference);
+  const account = (snapshot.data() ?? {}) as FirestoreAccount;
+  const state = account.profileSetupState
+    ?? (account.profileSetupComplete || hasExistingProfile ? "COMPLETED" : "NOT_STARTED");
+  const draft = sanitizeProfileSetupDraft(account.profileSetupDraft);
+
+  if (state === "COMPLETED" && (!account.profileSetupComplete || account.profileSetupState !== "COMPLETED")) {
+    await markAccountProfileSetupComplete(accountUid);
+  }
+
+  return { state, draft };
+}
+
+export async function startAccountProfileSetup(accountUid: string): Promise<void> {
+  getCurrentAuthenticatedUser(accountUid);
+  await firestore.updateDoc(firestore.doc(firebaseStore(), "accounts", accountUid), {
+    profileSetupState: "IN_PROGRESS",
+    profileSetupComplete: false,
+    onboardingComplete: false,
+    updatedAt: firestore.serverTimestamp(),
+  });
+}
+
+export async function saveAccountProfileSetupDraft(accountUid: string, draft: AccountProfileSetupDraft): Promise<void> {
+  getCurrentAuthenticatedUser(accountUid);
+  const normalizedDraft = sanitizeProfileSetupDraft(draft);
+  await firestore.updateDoc(firestore.doc(firebaseStore(), "accounts", accountUid), {
+    displayName: normalizedDraft.displayName,
+    profileSetupState: "IN_PROGRESS",
+    profileSetupComplete: false,
+    onboardingComplete: false,
+    profileSetupDraft: normalizedDraft,
     updatedAt: firestore.serverTimestamp(),
   });
 }

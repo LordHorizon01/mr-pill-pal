@@ -29,10 +29,14 @@ test("light and dark palettes implement the same complete semantic and compatibi
     assert.ok(ui.colors[role], `light ${role} is defined`);
     assert.ok(darkUiColors[role], `dark ${role} is defined`);
   }
-  assert.equal(ui.colors.primary, "#024A47");
-  assert.equal(ui.colors.accent, "#FC6B44");
-  assert.equal(ui.colors.support, "#658A63");
-  assert.equal(ui.colors.background, "#FBF4E9");
+  assert.equal(ui.colors.primary, "#0A5A54");
+  assert.equal(ui.colors.accent, "#E97859");
+  assert.equal(ui.colors.sage, "#789785");
+  assert.equal(ui.colors.background, "#F8F6F1");
+  assert.equal(ui.colors.canvas, ui.colors.background);
+  assert.equal(ui.colors.navigationSurface, "#FFFFFF");
+  assert.equal(darkUiColors.canvas, "#101C19");
+  assert.equal(darkUiColors.navigationSurface, "#233932");
 });
 
 test("light and dark semantic text pairs meet the normal-text contrast target", () => {
@@ -113,7 +117,7 @@ test("typography, spacing, radius, elevation, and touch tokens are complete and 
     assert.ok(style.fontWeight.length > 0, `${role} weight is defined`);
   }
   assert.deepEqual([ui.spacing.xxs, ui.spacing.xs, ui.spacing.sm, ui.spacing.md, ui.spacing.lg, ui.spacing.xl, ui.spacing.xxl], [4, 8, 12, 16, 20, 24, 32]);
-  assert.deepEqual([ui.radius.small, ui.radius.medium, ui.radius.large, ui.radius.pill], [8, 12, 16, 999]);
+  assert.deepEqual([ui.radius.small, ui.radius.medium, ui.radius.large, ui.radius.pill], [8, 14, 18, 999]);
   assert.deepEqual(ui.elevation, { card: 0, raised: 1, overlay: 4 });
   assert.equal(ui.touch.minimum, 48);
 });
@@ -134,8 +138,10 @@ test("motion durations stay within the calm product ranges and reduce appropriat
   assert.equal(motion.duration.feedback, 140);
   assert.equal(motion.duration.stateChange, 280);
   assert.equal(motion.duration.contentUpdate, 320);
-  assert.equal(motion.duration.tabContent, 300);
-  assert.equal(motion.duration.tabContentReducedMotion, 160);
+  assert.equal(motion.duration.tabContent, 240);
+  assert.equal(motion.duration.profileSheet, 320);
+  assert.equal(motion.duration.profileSheetReducedMotion, 120);
+  assert.equal(motion.duration.tabContentReducedMotion, 120);
   assert.equal(motion.duration.navigation, 380);
   assert.equal(motion.duration.skeletonRevealDelay, 300);
   assert.equal(motion.duration.skeletonMinVisible, 300);

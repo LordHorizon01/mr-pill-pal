@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AppState,
@@ -11,7 +11,6 @@ import {
 import { router, useFocusEffect } from "expo-router";
 
 import {
-  addDaysToLocalDate,
   toLocalDateString,
 } from "@/features/doses/dose.service";
 import { getDosePresentationState } from "@/features/doses/dose.domain";
@@ -19,6 +18,7 @@ import { TodayDose } from "@/features/doses/dose.types";
 import { useDoses } from "@/hooks/useDoses";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { ScreenHeader } from "@/components/screen-header";
+import { HomeDateCarousel } from "@/components/home-date-carousel";
 import { motion } from "@/components/motion-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
@@ -70,8 +70,9 @@ export default function HomeScreen() {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const doseProfileId = useDoseStore((state) => state.profileId);
   const loadedDate = useDoseStore((state) => state.loadedDate);
+  const todayDate = toLocalDateString();
   const {
-    selectedDate,
+    selectedDate: selectedScheduleDate,
     doses,
     isLoading,
     updatingDoseId,
@@ -82,14 +83,11 @@ export default function HomeScreen() {
     correctStatus,
     clearError,
   } = useDoses();
-  const hasCurrentDoseData = doseProfileId === selectedProfileId && loadedDate === selectedDate;
+  const hasCurrentDoseData = doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
   const delayedLoadingVisible = useDelayedLoading(isLoading && !hasCurrentDoseData);
   const showFirstScopeSkeleton = !error && !hasCurrentDoseData && delayedLoadingVisible;
   const hasCurrentDoseContent = hasCurrentDoseData;
-  const visibleDoses = hasCurrentDoseContent ? doses : [];
-  const [showTaken, setShowTaken] = useState(false);
-  const [showSkipped, setShowSkipped] = useState(false);
-  const [showMissed, setShowMissed] = useState(false);
+  const visibleDoses = useMemo(() => hasCurrentDoseContent ? doses : [], [doses, hasCurrentDoseContent]);
   const [statusMenuDose, setStatusMenuDose] = useState<TodayDose | null>(null);
   const [statusMenuAnchor, setStatusMenuAnchor] = useState<AnchoredMenuAnchor | null>(null);
   const statusMenuAnchorRefs = useRef<Record<string, View | null>>({});
@@ -98,6 +96,8 @@ export default function HomeScreen() {
   const skippedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "skipped"), [visibleDoses]);
   const missedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "missed"), [visibleDoses]);
   const recordedCount = takenDoses.length + skippedDoses.length;
+  const nextDose = pendingDoses[0] ?? null;
+  const scheduleDoses = useMemo(() => visibleDoses.filter((dose) => dose.id !== nextDose?.id), [nextDose?.id, visibleDoses]);
 
   const refreshDoses = useCallback(() => {
     void loadDoses();
@@ -105,16 +105,16 @@ export default function HomeScreen() {
   const { refreshing: userPullRefreshing, onRefresh: refreshFromPull } = useUserPullRefresh(loadDoses);
 
   useEffect(() => {
-    setShowTaken(false);
-    setShowSkipped(false);
-    setShowMissed(false);
-    setStatusMenuDose(null);
-    setStatusMenuAnchor(null);
+    const frame = requestAnimationFrame(() => {
+      setStatusMenuDose(null);
+      setStatusMenuAnchor(null);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [selectedProfileId]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshDoses();
+      if (selectedProfileId) refreshDoses();
     }, [refreshDoses, selectedProfileId]),
   );
 
@@ -128,9 +128,9 @@ export default function HomeScreen() {
     return () => subscription.remove();
   }, [refreshDoses]);
 
-  function changeDate(days: number) {
-    void loadDoses(addDaysToLocalDate(selectedDate, days));
-  }
+  const selectScheduleDate = useCallback((date: string) => {
+    if (date !== selectedScheduleDate) void loadDoses(date);
+  }, [loadDoses, selectedScheduleDate]);
 
   function confirmSkipDose(dose: TodayDose) {
     Alert.alert(
@@ -157,15 +157,7 @@ export default function HomeScreen() {
     ]);
   }
 
-  function openStatusMenu(dose: TodayDose) {
-    const anchor = statusMenuAnchorRefs.current[dose.id];
-    anchor?.measureInWindow((x, y, width, height) => {
-      setStatusMenuAnchor({ x, y, width, height });
-      setStatusMenuDose(dose);
-    });
-  }
-
-  function renderDose({ item }: { item: TodayDose }) {
+  function renderDose({ item, featured = false }: { item: TodayDose; featured?: boolean }) {
     const isUpdating = updatingDoseId === item.id;
     const isPending = item.status === "pending";
     const presentation = getDosePresentationState(
@@ -188,7 +180,7 @@ export default function HomeScreen() {
     const showsCorrectionOverflow = shouldShowDoseCorrectionOverflow(item.status);
 
     return (
-      <View style={styles.doseCard}>
+      <View style={[styles.doseCard, featured && styles.featuredDose]}>
         <View style={styles.cardTopRow}>
           <Text style={styles.time}>{formatTime(item.scheduledTime)}</Text>
           <StatusBadge label={statusLabel} tone={isFutureDose && isPending ? "upcoming" : item.status} />
@@ -201,7 +193,13 @@ export default function HomeScreen() {
           <View style={styles.finalizedStatusRow}>
             <Text style={[styles.statusDescription, styles.finalizedStatusDescription]}>{statusDescription}</Text>
             <View ref={(node) => { statusMenuAnchorRefs.current[item.id] = node; }} collapsable={false}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.medicationName} dose`} onPress={() => openStatusMenu(item)} disabled={Boolean(updatingDoseId)} style={styles.overflowButton}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.medicationName} dose`} onPress={() => {
+                const anchor = statusMenuAnchorRefs.current[item.id];
+                anchor?.measureInWindow((x, y, width, height) => {
+                  setStatusMenuAnchor({ x, y, width, height });
+                  setStatusMenuDose(item);
+                });
+              }} disabled={Boolean(updatingDoseId)} style={styles.overflowButton}>
                 <Text style={styles.overflowText}>⋮</Text>
               </Pressable>
             </View>
@@ -219,9 +217,9 @@ export default function HomeScreen() {
   }
 
   return (
-    <TabContentTransition style={styles.container}><ScreenHeader title="Mr. Pill Pal" /><View style={styles.container}>
+    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} /><View style={styles.container}>
       <FlatList
-        data={pendingDoses}
+        data={scheduleDoses}
         keyExtractor={(item) => item.id}
         renderItem={renderDose}
         contentContainerStyle={styles.listContent}
@@ -229,61 +227,27 @@ export default function HomeScreen() {
         onRefresh={refreshFromPull}
         ListHeaderComponent={
           <>
-            <View style={styles.header}>
-              <Text style={styles.greeting}>{getHomeGreeting(selectedProfile)}</Text>
-              <Text style={styles.homeDate}>{formatDate(selectedDate)}</Text>
-              <Text style={styles.offlineHint}>Your medication routine works without internet</Text>
-            </View>
-
-            <View style={styles.dateControls}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Show previous day"
-                onPress={() => changeDate(-1)}
-                style={styles.dateButton}
-              >
-                <Text style={styles.dateButtonText}>Previous</Text>
-              </Pressable>
-
-              <View style={styles.dateCenter}>
-                <Text style={styles.dateLabel}>{formatDate(selectedDate)}</Text>
-                {selectedDate !== toLocalDateString() ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Return to today"
-                    onPress={() => void loadDoses(toLocalDateString())}
-                  >
-                    <Text style={styles.todayLink}>Back to today</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Show next day"
-                onPress={() => changeDate(1)}
-                style={styles.dateButton}
-              >
-                <Text style={styles.dateButtonText}>Next</Text>
-              </Pressable>
-            </View>
+            <HomeDateCarousel todayDate={todayDate} selectedScheduleDate={selectedScheduleDate} colors={colors} onSelectDate={selectScheduleDate} />
 
             <ContentFade key={hasCurrentDoseContent ? "home-summary-content" : showFirstScopeSkeleton ? "home-summary-skeleton" : "home-summary-wait"} duration={motion.duration.skeletonCrossfade}>{hasCurrentDoseContent ? <View style={styles.progressCard}>
-              <Text style={styles.progressTitle}>Daily routine</Text>
+              <Text style={styles.progressTitle}>Today&apos;s summary</Text>
               <Text style={styles.progressText}>{recordedCount} of {visibleDoses.length} doses recorded</Text>
               <View style={styles.summaryCounts}>
                 <Text style={styles.summaryText}>Taken {takenDoses.length}</Text>
-                <Text style={styles.summaryText}>Skipped {skippedDoses.length}</Text>
-                <Text style={styles.summaryText}>Pending {pendingDoses.length}</Text>
+                <Text style={styles.summaryText}>Upcoming {pendingDoses.length}</Text>
+                {skippedDoses.length ? <Text style={styles.summaryText}>Skipped {skippedDoses.length}</Text> : null}
                 {missedDoses.length ? <Text style={styles.summaryText}>Missed {missedDoses.length}</Text> : null}
               </View>
-              {pendingDoses[0] ? <Text style={styles.nextText}>Next: {pendingDoses[0].medicationName} at {formatTime(pendingDoses[0].scheduledTime)}</Text> : null}
             </View> : showFirstScopeSkeleton ? <HomeSummarySkeleton /> : <View style={styles.progressPlaceholder} />}</ContentFade>
-            <View style={styles.quickActions}>
+            <Text style={styles.sectionTitle}>Next medication</Text>
+            {nextDose ? renderDose({ item: nextDose, featured: true }) : hasCurrentDoseContent && visibleDoses.length > 0 ? <View style={styles.caughtUp}>
+              <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
+              <Text style={styles.emptyText}>No more medications scheduled for today.</Text>
+            </View> : null}
+            <View style={styles.scheduleHeading}>
+              <Text style={styles.sectionTitle}>Today&apos;s schedule</Text>
               <ThemedButton label="Add medication" tone="outline" size="compact" onPress={() => router.push("/medications")} accessibilityLabel="Add medication" style={styles.quickButton} />
-              <ThemedButton label="View history" tone="outline" size="compact" onPress={() => router.push("/history" as never)} accessibilityLabel="View medication history" style={styles.quickButton} />
             </View>
-            <Text style={styles.sectionTitle}>{selectedDate === toLocalDateString() ? "To take" : "Planned doses"}</Text>
 
             {error ? (
               <Pressable
@@ -300,71 +264,34 @@ export default function HomeScreen() {
           </>
         }
         ListEmptyComponent={
-          showFirstScopeSkeleton ? <ContentFade key="home-dose-skeleton" duration={motion.duration.skeletonCrossfade}><DoseListSkeleton /></ContentFade> : hasCurrentDoseContent && pendingDoses.length === 0 ? (
+          showFirstScopeSkeleton ? <ContentFade key="home-dose-skeleton" duration={motion.duration.skeletonCrossfade}><DoseListSkeleton /></ContentFade> : hasCurrentDoseContent && scheduleDoses.length === 0 && !nextDose && visibleDoses.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>{visibleDoses.length ? "No doses waiting" : "No doses scheduled for today"}</Text>
-              <Text style={styles.emptyText}>{visibleDoses.length ? "Recorded doses are available in their sections below." : "Add your first medication to get started."}</Text>
-              <ThemedButton label="Manage medications" onPress={() => router.push("/medications")} accessibilityLabel="Manage medications" style={styles.emptyButton} />
+              <Text style={styles.emptyTitle}>No medications yet</Text>
+              <Text style={styles.emptyText}>Add your first medication to start building your routine.</Text>
+              <ThemedButton label="Add medication" onPress={() => router.push("/medications")} accessibilityLabel="Add medication" style={styles.emptyButton} />
             </View>
-          ) : null
+          ) : hasCurrentDoseContent && scheduleDoses.length === 0 && nextDose ? <Text style={styles.scheduleEnd}>No more medications scheduled for today.</Text> : null
         }
-        ListFooterComponent={<View style={styles.completedSection}>
-          <FinalizedSection label="Taken today" doses={takenDoses} expanded={showTaken} onToggle={() => setShowTaken((value) => !value)} renderDose={renderDose} />
-          <FinalizedSection label="Skipped today" doses={skippedDoses} expanded={showSkipped} onToggle={() => setShowSkipped((value) => !value)} renderDose={renderDose} />
-          <FinalizedSection label="Missed today" doses={missedDoses} expanded={showMissed} onToggle={() => setShowMissed((value) => !value)} renderDose={renderDose} />
-        </View>}
       />
       <DoseStatusOverflowSheet dose={statusMenuDose} anchor={statusMenuAnchor} onClose={() => { setStatusMenuDose(null); setStatusMenuAnchor(null); }} onCorrect={(target) => statusMenuDose && confirmStatusCorrection(statusMenuDose, target)} />
     </View></TabContentTransition>
   );
 }
 
-function FinalizedSection({ label, doses, expanded, onToggle, renderDose }: { label: string; doses: TodayDose[]; expanded: boolean; onToggle: () => void; renderDose: ({ item }: { item: TodayDose }) => ReactElement }) {
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
-  if (!doses.length) return null;
-  return <View style={styles.finalizedGroup}><Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label}`} accessibilityState={{ expanded }} onPress={onToggle} style={styles.completedToggle}><Text style={styles.sectionTitle}>{label} ({doses.length})</Text><Text style={styles.todayLink}>{expanded ? "Hide" : "Show"}</Text></Pressable>{expanded ? doses.map((dose) => <View key={dose.id}>{renderDose({ item: dose })}</View>) : null}</View>;
-}
-
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   container: { flex: 1 },
-  listContent: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 110 },
-  header: { gap: 8 },
-  greeting: { marginTop: 10, fontSize: 21, lineHeight: 27, fontWeight: "700", color: colors.textPrimary },
-  homeDate: { fontSize: 17, fontWeight: "700", color: colors.textSecondary },
-  offlineHint: { fontSize: 14, lineHeight: 20, color: colors.textMuted },
-  dateControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 24,
-    marginBottom: 20,
-    gap: 8,
-  },
-  dateCenter: { flex: 1, minWidth: 0, alignItems: "center" },
-  dateLabel: { fontSize: 17, fontWeight: "700", textAlign: "center", color: colors.textPrimary },
-  todayLink: { marginTop: 4, color: colors.outlineForeground, fontSize: 14, fontWeight: "600" },
-  dateButton: {
-    minHeight: ui.touch.minimum,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.secondaryBackground,
-  },
-  dateButtonText: { fontWeight: "700", color: colors.secondaryForeground },
-  progressCard: { padding: ui.spacing.card, marginBottom: 18, borderRadius: ui.radius.card, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.secondaryBackground },
-  progressPlaceholder: { minHeight: 126, marginBottom: 18 },
-  progressTitle: { fontSize: 17, fontWeight: "700", color: colors.secondaryForeground },
-  progressText: { marginTop: 5, fontSize: 16, color: colors.secondaryForeground },
-  nextText: { marginTop: 8, fontSize: 15, fontWeight: "600", color: colors.secondaryForeground },
-  summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
-  summaryText: { color: colors.secondaryForeground, fontSize: 14, fontWeight: "600" },
-  quickActions: { flexDirection: "row", flexWrap: "wrap", gap: ui.spacing.xs, marginBottom: 20 },
-  quickButton: { flexGrow: 1 },
+  listContent: { padding: ui.spacing.screen, paddingTop: 10, paddingBottom: 120 },
+  progressCard: { paddingHorizontal: ui.spacing.card, paddingVertical: ui.spacing.md, marginBottom: ui.spacing.section, borderRadius: ui.radius.medium, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSubtle },
+  progressPlaceholder: { minHeight: 84, marginBottom: ui.spacing.section },
+  progressTitle: { fontSize: 15, fontWeight: "800", color: colors.textPrimary },
+  progressText: { marginTop: 3, fontSize: 14, color: colors.textSecondary },
+  summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 9 },
+  summaryText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
+  quickButton: { flexGrow: 0 },
+  scheduleHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md, marginBottom: ui.spacing.xs },
+  caughtUp: { paddingVertical: ui.spacing.md },
+  scheduleEnd: { paddingVertical: ui.spacing.md, color: colors.textSecondary, fontSize: 14 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  completedSection: { marginTop: 20 },
-  finalizedGroup: { marginBottom: 8 },
-  completedToggle: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   errorBox: {
     marginBottom: 16,
     padding: 14,
@@ -374,14 +301,8 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   errorText: { fontSize: 15, fontWeight: "600", color: colors.dangerForeground },
   errorHint: { marginTop: 4, fontSize: 13, color: colors.textMuted },
   loader: { marginVertical: 32 },
-  doseCard: {
-    marginBottom: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    backgroundColor: colors.cardBackground,
-  },
+  doseCard: { marginBottom: 0, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  featuredDose: { marginBottom: ui.spacing.section, padding: ui.spacing.card, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.borderStrong, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
   cardTopRow: {
     flexDirection: "row",
     alignItems: "center",

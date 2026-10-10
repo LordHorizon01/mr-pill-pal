@@ -10,8 +10,8 @@ const spacingScale = {
 
 const radiusScale = {
   small: 8,
-  medium: 12,
-  large: 16,
+  medium: 14,
+  large: 18,
   pill: 999,
 } as const;
 
@@ -29,8 +29,160 @@ const typography = {
   numeric: { fontSize: 28, lineHeight: 36, fontWeight: "700", letterSpacing: 0.1 },
 } as const;
 
-export const ui = {
-  colors: {
+// Product foundation for signed-in screens and shared primitives. Compatibility
+// aliases below keep existing feature screens on the same palette while they
+// migrate to the semantic roles.
+const lightProductRoles = {
+  canvas: "#F8F6F1",
+  background: "#F8F6F1",
+  backgroundSubtle: "#EEF4F1",
+  surface: "#FFFFFF",
+  surfaceSubtle: "#EEF4F1",
+  elevatedSurface: "#E8F0EC",
+  surfaceRaised: "#E8F0EC",
+  surfaceMuted: "#EEF4F1",
+  primary: "#0A5A54",
+  primaryStrong: "#06443F",
+  primaryPressed: "#06443F",
+  primarySoft: "#DCECE7",
+  onPrimary: "#FFFFFF",
+  accent: "#E97859",
+  accentSoft: "#FBE8E1",
+  accentForeground: "#42190F",
+  sage: "#789785",
+  sageSoft: "#E8EFEA",
+  textPrimary: "#18312E",
+  textSecondary: "#5E6E69",
+  // #899491 is only 3.13:1 on white; use body-safe secondary text contrast.
+  textMuted: "#5E6E69",
+  border: "#D7E1DD",
+  dividerStrong: "#8FA7A0",
+  // The supplied #B6CAC2 is too low-contrast for visible control outlines.
+  borderStrong: "#718C83",
+  strongBorder: "#718C83",
+  success: "#357A59",
+  successSurface: "#E2F0E7",
+  warning: "#A66D20",
+  warningSurface: "#F8ECD6",
+  danger: "#B34E4A",
+  dangerSurface: "#F7E2E0",
+  dangerBackground: "#F7E2E0",
+  dangerForeground: "#8D3C38",
+  placeholder: "#5E6E69",
+  inputBackground: "#FFFFFF",
+  inputForeground: "#18312E",
+  cardBackground: "#FFFFFF",
+  cardForeground: "#18312E",
+  secondaryBackground: "#DCECE7",
+  secondaryForeground: "#06443F",
+  selectedBackground: "#0A5A54",
+  selectedForeground: "#FFFFFF",
+  primaryBackground: "#0A5A54",
+  primaryForeground: "#FFFFFF",
+  focus: "#0A5A54",
+  outlineBorder: "#5F786F",
+  outlineForeground: "#0A5A54",
+  chipBorder: "#718C83",
+  chipBackground: "#FFFFFF",
+  chipForeground: "#18312E",
+  chipSelectedBackground: "#0A5A54",
+  chipSelectedForeground: "#FFFFFF",
+  chipPressedBackground: "#DCECE7",
+  chipPressedForeground: "#06443F",
+  chipSelectedPressedBackground: "#06443F",
+  chipSelectedPressedForeground: "#FFFFFF",
+  chipDisabledBackground: "#EEF4F1",
+  chipDisabledForeground: "#61706C",
+  chipDisabledBorder: "#B7C9C1",
+  disabledBackground: "#EEF4F1",
+  disabledText: "#5E6E69",
+  navigationSurface: "#FFFFFF",
+  navigationSelected: "#DCECE7",
+  navigationSelectedText: "#06443F",
+  navigationInactive: "#61706C",
+  navigationBorder: "#D7E1DD",
+  // Backward-compatible feature aliases now resolve to the product palette.
+  surfaceElevated: "#E8F0EC",
+  card: "#FFFFFF",
+  text: "#18312E",
+  muted: "#61706C",
+};
+
+const darkProductRoles = {
+  canvas: "#101C19",
+  background: "#101C19",
+  backgroundSubtle: "#1D302B",
+  surface: "#172723",
+  surfaceSubtle: "#1D302B",
+  elevatedSurface: "#233932",
+  surfaceRaised: "#233932",
+  surfaceMuted: "#1D302B",
+  primary: "#88C7B8",
+  primaryStrong: "#A8D8CC",
+  primaryPressed: "#A8D8CC",
+  primarySoft: "#23463E",
+  onPrimary: "#101C19",
+  accent: "#F39478",
+  accentSoft: "#4A2B24",
+  accentForeground: "#482219",
+  sage: "#A4BCAA",
+  sageSoft: "#263B33",
+  textPrimary: "#F4F6F4",
+  textSecondary: "#B7C4BF",
+  textMuted: "#9BB3AA",
+  border: "#304A43",
+  dividerStrong: "#71877F",
+  // #45665D is below 3:1 against the raised surface; this keeps control edges visible.
+  borderStrong: "#6A8980",
+  strongBorder: "#6A8980",
+  success: "#83C49C",
+  successSurface: "#203D2E",
+  warning: "#E1B76D",
+  warningSurface: "#49391E",
+  danger: "#EB8E88",
+  dangerSurface: "#4D2928",
+  dangerBackground: "#4D2928",
+  dangerForeground: "#EB8E88",
+  placeholder: "#B7C4BF",
+  inputBackground: "#172723",
+  inputForeground: "#F4F6F4",
+  cardBackground: "#172723",
+  cardForeground: "#F4F6F4",
+  secondaryBackground: "#23463E",
+  secondaryForeground: "#A8D8CC",
+  selectedBackground: "#88C7B8",
+  selectedForeground: "#101C19",
+  primaryBackground: "#88C7B8",
+  primaryForeground: "#101C19",
+  focus: "#A8D8CC",
+  outlineBorder: "#9BB3AA",
+  outlineForeground: "#A8D8CC",
+  chipBorder: "#6A8980",
+  chipBackground: "#172723",
+  chipForeground: "#F4F6F4",
+  chipSelectedBackground: "#88C7B8",
+  chipSelectedForeground: "#101C19",
+  chipPressedBackground: "#23463E",
+  chipPressedForeground: "#F4F6F4",
+  chipSelectedPressedBackground: "#A8D8CC",
+  chipSelectedPressedForeground: "#101C19",
+  chipDisabledBackground: "#1D302B",
+  chipDisabledForeground: "#899B95",
+  chipDisabledBorder: "#45665D",
+  disabledBackground: "#1D302B",
+  disabledText: "#899B95",
+  navigationSurface: "#233932",
+  navigationSelected: "#23463E",
+  navigationSelectedText: "#A8D8CC",
+  navigationInactive: "#B7C4BF",
+  navigationBorder: "#304A43",
+  surfaceElevated: "#233932",
+  card: "#172723",
+  text: "#F4F6F4",
+  muted: "#B7C4BF",
+};
+
+const legacyUiColors = {
     // Brand palette: deep teal leads; coral and sage support rather than compete.
     background: "#FBF4E9",
     backgroundSubtle: "#F3EBDD",
@@ -114,7 +266,10 @@ export const ui = {
     muted: "#405B56",
     primaryBackground: "#024A47",
     primaryForeground: "#FFFFFF",
-  },
+};
+
+export const ui = {
+  colors: { ...legacyUiColors, ...lightProductRoles },
   typography,
   spacing: {
     ...spacingScale,
@@ -172,7 +327,7 @@ export function getButtonColorRoles(tone: ButtonColorTone, state: ButtonColorSta
   return buttonColorRoles[tone][state];
 }
 
-export const darkUiColors: AppColorTokens = {
+const legacyDarkUiColors = {
   ...ui.colors,
   background: "#14211E",
   backgroundSubtle: "#192925",
@@ -255,6 +410,54 @@ export const darkUiColors: AppColorTokens = {
   muted: "#CBD8D0",
   primaryBackground: "#70B5A7",
   primaryForeground: "#082C27",
+};
+
+export const darkUiColors: AppColorTokens = { ...legacyDarkUiColors, ...darkProductRoles };
+
+function profileSetupAlias(colors: AppColorTokens) {
+  return {
+    canvas: colors.canvas,
+    surface: colors.surface,
+    surfaceSubtle: colors.surfaceSubtle,
+    surfaceMint: colors.primarySoft,
+    surfaceElevated: colors.elevatedSurface,
+    primary: colors.primary,
+    primaryStrong: colors.primaryStrong,
+    primarySoft: colors.primarySoft,
+    onPrimary: colors.onPrimary,
+    accent: colors.accent,
+    accentSoft: colors.accentSoft,
+    sage: colors.sage,
+    sageSoft: colors.sageSoft,
+    textPrimary: colors.textPrimary,
+    textSecondary: colors.textSecondary,
+    textMuted: colors.textMuted,
+    border: colors.border,
+    borderStrong: colors.strongBorder,
+    success: colors.success,
+    successSurface: colors.successSurface,
+    warning: colors.warning,
+    warningSurface: colors.warningSurface,
+    danger: colors.danger,
+    dangerSurface: colors.dangerSurface,
+    // Backward-compatible field names for the existing Auth/KYC components.
+    surfaceMuted: colors.surfaceSubtle,
+    text: colors.textPrimary,
+    teal: colors.primary,
+    tealPressed: colors.primaryStrong,
+    onTeal: colors.onPrimary,
+    mint: colors.primarySoft,
+    coral: colors.accent,
+    amber: colors.warning,
+    error: colors.danger,
+    errorSurface: colors.dangerSurface,
+  };
+}
+
+/** Auth/KYC compatibility view over the same authoritative product palettes. */
+export const profileSetupColors = {
+  light: profileSetupAlias(ui.colors),
+  dark: profileSetupAlias(darkUiColors),
 };
 
 export function resolveAppearance(preference: AppearancePreference, systemScheme: "light" | "dark" | "unspecified" | null | undefined): "light" | "dark" {

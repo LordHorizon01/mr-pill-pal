@@ -112,7 +112,7 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   badge: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: ui.radius.chip },
   badgeText: ui.typography.label,
   button: { minHeight: ui.touch.minimum, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 16, borderRadius: ui.radius.button },
-  compactButton: { minHeight: 44, paddingHorizontal: 12 },
+  compactButton: { minHeight: ui.touch.minimum, paddingHorizontal: 12 },
   borderedButton: { borderWidth: 1 },
   buttonText: ui.typography.button,
   buttonLabelSlot: { position: "relative", alignItems: "center", justifyContent: "center" },

@@ -378,7 +378,7 @@ export function FirstRunExperience({ showOnboarding, onFinished }: Props) {
         <View style={styles.privacyNote}><Text style={styles.privacyNoteTitle}>Your choice</Text><Text style={styles.privacyNoteBody}>We only ask after you choose Enable. Medication and intake records continue to work on this device if reminders are off.</Text></View>
         {permissionState === "granted" ? <Text style={styles.notice}>Notifications are enabled.</Text> : null}
         {permissionState === "denied" && !permission.canAskAgain ? <Text style={styles.notice}>Notifications are off for now. You can enable them later in phone settings.</Text> : null}
-        {permissionProblem ? <Text style={styles.notice}>We couldn't check notification access just now. You can continue and change it later.</Text> : null}
+        {permissionProblem ? <Text style={styles.notice}>We couldn&apos;t check notification access just now. You can continue and change it later.</Text> : null}
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       </View>
       <View style={styles.footer}>

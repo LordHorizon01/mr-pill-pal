@@ -23,11 +23,11 @@ import {
 } from "@/database/database";
 import { BrandedStartupSplash, FirstRunExperience } from "@/components/first-run-experience";
 import { AppDrawerProvider } from "@/components/app-drawer";
-import { AppColorTokens, ui } from "@/components/ui-tokens";
+import { AppColorTokens } from "@/components/ui-tokens";
 import { motion } from "@/components/motion-tokens";
-import { AppThemeProvider, useAppTheme } from "@/components/app-theme-provider";
-import { useAppThemeColorStyle } from "@/components/app-theme-provider";
+import { AppThemeProvider, useAppTheme, useAppThemeColorStyle } from "@/components/app-theme-provider";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { PROFILE_SETUP_HOME_TRANSITION_MS } from "@/features/first-run/handoff.domain";
 import {
   reconcileReminderHealth,
   ReminderHealthResult,
@@ -37,6 +37,7 @@ import { reconcileLowStockAlertsForAccount } from "@/features/refills/low-stock-
 import { useAuthStore } from "@/state/auth.store";
 import { useProfileStore } from "@/state/profile.store";
 import { AuthGate } from "@/components/auth-gate";
+import { getAccountProfileSetupProgress } from "@/features/auth/auth.service";
 import { useSettingsStore } from "@/state/settings.store";
 import { FirstRunPreferences } from "@/features/first-run/first-run.domain";
 import { loadFirstRunPreferences, resetFirstRunPreferencesForDevelopment } from "@/features/first-run/first-run.repository";
@@ -61,7 +62,6 @@ export default function RootLayout() {
   const [areSettingsReady, setAreSettingsReady] = useState(false);
   const [startupHandoffComplete, setStartupHandoffComplete] = useState(false);
   const firstRunLoadStarted = useRef(false);
-  const previousDestinationKind = useRef("loading");
   const activeReminderHealthKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -125,7 +125,12 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isDatabaseReady || !authUser || authPhase === "verification_required") return;
     let current = true;
-    void useProfileStore.getState().loadForAccount(authUser.uid).then((ready) => { if (current) setProfileReady(ready); });
+    void useProfileStore.getState().loadForAccount(authUser.uid).then(async (hasProfile) => {
+      const progress = await getAccountProfileSetupProgress(authUser.uid, hasProfile);
+      if (current) setProfileReady(progress.state === "COMPLETED");
+    }).catch(() => {
+      if (current) setProfileReady(false);
+    });
     return () => { current = false; };
   }, [authUser?.uid, authPhase === "verification_required", isDatabaseReady, setProfileReady]);
 
@@ -223,10 +228,6 @@ export default function RootLayout() {
     (authPhase !== "authenticated" || isStartupReminderHealthReady)
   );
 
-  useEffect(() => {
-    if (!startupReady) setStartupHandoffComplete(false);
-  }, [startupReady]);
-
   async function replayFirstRunForDevelopment() {
     if (!__DEV__) return;
     await resetFirstRunPreferencesForDevelopment();
@@ -238,7 +239,7 @@ export default function RootLayout() {
   let destinationKind = "loading";
   if (databaseError) {
     destinationKind = "error";
-    destination = <ThemedStartupError message={databaseError} onRetry={() => setStartupAttempt((attempt) => attempt + 1)} />;
+    destination = <ThemedStartupError message={databaseError} onRetry={() => { setStartupHandoffComplete(false); setStartupAttempt((attempt) => attempt + 1); }} />;
   } else if (startupReady && isFirstRun) {
     destinationKind = "first-run";
     destination = <FirstRunExperience
@@ -252,13 +253,8 @@ export default function RootLayout() {
     destinationKind = "app";
     destination = <ThemedApp reminderMessage={reminderMessage} onDismissReminder={() => setReminderMessage(null)} />;
   }
-  const isPrimerToAuthHandoff = previousDestinationKind.current === "first-run" && destinationKind === "auth";
-  useEffect(() => {
-    if (destination) previousDestinationKind.current = destinationKind;
-  }, [destinationKind, Boolean(destination)]);
-
   return <SafeAreaProvider><AppThemeProvider><View style={{ flex: 1 }}>
-    {destination ? <DestinationTransition key={destinationKind} kind={destinationKind} authHandoff={isPrimerToAuthHandoff}>{destination}</DestinationTransition> : null}
+    {destination ? <DestinationTransition key={destinationKind} kind={destinationKind} authHandoff={destinationKind === "auth"}>{destination}</DestinationTransition> : null}
     {!startupReady || !startupHandoffComplete ? <BrandedStartupSplash
       ready={startupReady}
       duration={isFirstRun ? 1500 : 650}
@@ -271,6 +267,7 @@ function DestinationTransition({ children, kind, authHandoff }: { children: Reac
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
   if (kind !== "first-run" && !authHandoff) {
+    if (kind === "app") return <Animated.View entering={FadeIn.duration(reducedMotion ? motion.duration.firstRunReducedTransition : PROFILE_SETUP_HOME_TRANSITION_MS)} style={{ flex: 1, backgroundColor: colors.background }}>{children}</Animated.View>;
     return <View style={{ flex: 1, backgroundColor: colors.background }}>{children}</View>;
   }
   const enter = reducedMotion

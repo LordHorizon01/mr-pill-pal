@@ -28,8 +28,9 @@ export interface Profile {
 export interface CreateProfileInput {
   fullName: string;
   nickname?: string;
-  dateOfBirth: string;
+  dateOfBirth?: string;
   relationship: ProfileRelationship;
+  avatarUrl?: string;
   medicalDetails?: MedicalProfileDetails;
 }
 

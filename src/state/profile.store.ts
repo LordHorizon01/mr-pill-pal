@@ -10,10 +10,11 @@ import { createAsyncRequestGuard } from "@/state/async-request.domain";
 
 const profileLoadGuard = createAsyncRequestGuard();
 const profileSelectionGuard = createAsyncRequestGuard();
+let pendingProfileSelection: { accountUid: string; profileId: string; revision: number } | null = null;
 
 type ProfileState = {
   accountUid: string | null; profiles: Profile[]; selectedProfileId: string | null; isLoading: boolean; isSaving: boolean; error: string | null; needsLegacyAdoption: boolean;
-  loadForAccount: (accountUid: string) => Promise<boolean>; selectProfile: (profileId: string) => Promise<void>; createProfile: (input: CreateProfileInput) => Promise<Profile>; updateProfile: (profileId: string, input: UpdateProfileInput) => Promise<void>; deactivateProfile: (profileId: string) => Promise<void>; adoptLegacy: () => Promise<void>; deferLegacyAdoption: () => Promise<void>; clearForLogout: () => Promise<void>; clearError: () => void;
+  loadForAccount: (accountUid: string) => Promise<boolean>; selectProfile: (profileId: string) => Promise<void>; createProfile: (input: CreateProfileInput, options?: { deferAuthReady?: boolean }) => Promise<Profile>; updateProfile: (profileId: string, input: UpdateProfileInput) => Promise<void>; deactivateProfile: (profileId: string) => Promise<void>; adoptLegacy: () => Promise<void>; deferLegacyAdoption: () => Promise<void>; clearForLogout: () => Promise<void>; clearError: () => void;
 };
 
 async function syncProfileScopedStores(profileId: string | null): Promise<void> {
@@ -33,6 +34,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   accountUid: null, profiles: [], selectedProfileId: null, isLoading: false, isSaving: false, error: null, needsLegacyAdoption: false,
   loadForAccount: async (accountUid) => {
     profileSelectionGuard.invalidate();
+    pendingProfileSelection = null;
     const requestRevision = profileLoadGuard.begin();
     set({ isLoading: true, isSaving: false, error: null, accountUid });
     try {
@@ -53,8 +55,10 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   selectProfile: async (profileId) => {
     const accountUid = get().accountUid;
     if (!accountUid) throw new Error("Sign in before switching profiles.");
-    if (get().selectedProfileId === profileId) return;
+    const pendingSelection = pendingProfileSelection;
+    if (get().selectedProfileId === profileId && (!pendingSelection || pendingSelection.accountUid !== accountUid || pendingSelection.profileId === profileId)) return;
     const requestRevision = profileSelectionGuard.begin();
+    pendingProfileSelection = { accountUid, profileId, revision: requestRevision };
     set({ isSaving: true, error: null });
     try {
       const profile = await getLocalProfile(accountUid, profileId);
@@ -69,9 +73,11 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       if (!profileSelectionGuard.isCurrent(requestRevision)) return;
       set({ isSaving: false, error: toAuthMessage(error, "Could not switch profiles. Please try again.") });
       throw error;
+    } finally {
+      if (pendingProfileSelection?.revision === requestRevision) pendingProfileSelection = null;
     }
   },
-  createProfile: async (input) => {
+  createProfile: async (input, options) => {
     if (activeProfileCreation) return activeProfileCreation;
     const accountUid = get().accountUid;
     if (!accountUid) throw new Error("Sign in before adding a profile.");
@@ -114,7 +120,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         await clearPendingProfileCreation(accountUid);
         const profiles = [...get().profiles.filter((item) => item.id !== profile.id), profile];
         set({ profiles, selectedProfileId, isSaving: false });
-        if (wasUnselected) {
+        if (wasUnselected && !options?.deferAuthReady) {
           const { useAuthStore } = await import("@/state/auth.store");
           useAuthStore.getState().setProfileReady(true);
         }
@@ -147,6 +153,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   clearForLogout: async () => {
     profileLoadGuard.invalidate();
     profileSelectionGuard.invalidate();
+    pendingProfileSelection = null;
     const accountUid = get().accountUid;
     try {
       if (accountUid) await saveSelectedProfileId(accountUid, null);

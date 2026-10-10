@@ -22,14 +22,14 @@ export function TabContentTransition({ children, style }: { children: React.Reac
     cancelAnimation(opacity);
 
     if (!returningToScreen) {
-      opacity.value = 1;
+      opacity.set(1);
       return;
     }
 
     const { fromOpacity, duration } = getTabContentFadeConfig(reduceMotion);
-    opacity.value = fromOpacity;
+    opacity.set(fromOpacity);
     const config = { duration, easing: Easing.bezier(...motion.easing.standard) };
-    opacity.value = withTiming(1, config);
+    opacity.set(withTiming(1, config));
 
     return () => {
       cancelAnimation(opacity);

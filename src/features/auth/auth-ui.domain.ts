@@ -10,6 +10,7 @@ export type AuthOperation =
   | "leave-unverified-session"
   | "leave-profile-setup"
   | "profile-create"
+  | "profile-setup"
   | null;
 
 export type AuthBackBehavior = "normal" | "auth-cancel" | "authenticated-onboarding-exit";
