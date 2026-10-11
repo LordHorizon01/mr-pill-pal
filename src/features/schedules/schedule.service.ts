@@ -39,6 +39,7 @@ import {
 } from "./schedule.types";
 import {
   getScheduleEditStatusAfterPersist,
+  getScheduleStartTimeError,
   hasScheduleChanges,
   isOneTimeScheduleInFuture,
   isReminderRegistrationHealthy,
@@ -539,9 +540,15 @@ async function addScheduleInternal(
 
   const normalizedTime = validateTime(input.time);
 
-  if (input.type === "one_time") {
-    // This must happen before createSchedule so an expired input never reaches SQLite.
-    validateOneTimeReminderIsFuture(startDate, normalizedTime);
+  // Enforce local first-occurrence rules before SQLite or notification APIs.
+  const temporalError = getScheduleStartTimeError(startDate, normalizedTime, input.type);
+  if (temporalError === "past_date") {
+    throw new Error("Choose today or a future date.");
+  }
+  if (temporalError === "past_time_today") {
+    throw new Error(input.type === "recurring"
+      ? "Choose a later time or a future start date."
+      : "Choose a time later than now.");
   }
 
   const existingSchedules = await getSchedulesByMedicationId(medication.profileId, input.medicationId);
@@ -712,6 +719,19 @@ export async function updateMedicationSchedule(
     const normalizedInput = normalizeScheduleUpdate(schedule, input);
     if (!hasScheduleChanges(schedule, normalizedInput)) {
       return schedule;
+    }
+
+    const changedStartDate = normalizedInput.startDate !== schedule.startDate;
+    if (changedStartDate || schedule.startDate >= toLocalDateString()) {
+      const temporalError = getScheduleStartTimeError(normalizedInput.startDate, normalizedInput.time, schedule.type);
+      if (temporalError === "past_date") {
+        throw new Error("Choose today or a future date.");
+      }
+      if (temporalError === "past_time_today") {
+        throw new Error(schedule.type === "recurring"
+          ? "Choose a later time or a future start date."
+          : "Choose a time later than now.");
+      }
     }
 
     const medication = await getMedicationById(schedule.profileId, schedule.medicationId);

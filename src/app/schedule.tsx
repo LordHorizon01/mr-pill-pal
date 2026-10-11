@@ -9,6 +9,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -21,7 +22,7 @@ import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { BadgeTone, StatusBadge } from "@/components/themed-ui";
-import { hasScheduleChanges } from "@/features/schedules/schedule-edit.domain";
+import { getScheduleStartTimeError, hasScheduleChanges } from "@/features/schedules/schedule-edit.domain";
 import type { MedicationSchedule, ReminderStatus } from "@/features/schedules/schedule.types";
 import { useProfileStore } from "@/state/profile.store";
 
@@ -115,6 +116,10 @@ function timeFromString(value: string): Date {
   const result = new Date();
   result.setHours(hours, minutes, 0, 0);
   return result;
+}
+
+function localStartOfToday(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
 }
 
 function getScheduleSummary(schedule: Pick<MedicationSchedule, "type" | "time" | "startDate" | "repeatDays">): string {
@@ -283,7 +288,19 @@ export default function ScheduleScreen() {
     date?: Date,
   ) {
     if (date) {
+      const error = getScheduleStartTimeError(
+        format(date, "yyyy-MM-dd"),
+        format(selectedTime, "HH:mm"),
+        editingSchedule?.type ?? scheduleMode,
+        new Date(),
+      );
+      if (error === "past_date") {
+        setFormMessage("Choose today or a future date.");
+        setShowDatePicker(false);
+        return;
+      }
       setSelectedDate(date);
+      setFormMessage(error === "past_time_today" ? temporalErrorMessage(editingSchedule?.type ?? scheduleMode) : null);
       setShowDatePicker(false);
     }
   }
@@ -293,22 +310,42 @@ export default function ScheduleScreen() {
     time?: Date,
   ) {
     if (time) {
+      const today = format(new Date(), "yyyy-MM-dd");
+      const selectedDay = format(selectedDate, "yyyy-MM-dd");
+      const editingHistoricalStart = Boolean(editingSchedule && editingSchedule.startDate < today && selectedDay === editingSchedule.startDate);
+      const temporalError = editingHistoricalStart ? null : getScheduleStartTimeError(
+        selectedDay,
+        format(time, "HH:mm"),
+        editingSchedule?.type ?? scheduleMode,
+        new Date(),
+      );
+      if (temporalError) {
+        setFormMessage(temporalErrorMessage(editingSchedule?.type ?? scheduleMode, temporalError));
+        setShowTimePicker(false);
+        return;
+      }
       setSelectedTime(time);
+      setFormMessage(null);
       setShowTimePicker(false);
     }
   }
 
-  function isSelectedOneTimeInThePast(): boolean {
-    const reminderDate = new Date(selectedDate);
-
-    reminderDate.setHours(
-      selectedTime.getHours(),
-      selectedTime.getMinutes(),
-      0,
-      0,
+  function getSelectedStartTimeError() {
+    const startDate = format(selectedDate, "yyyy-MM-dd");
+    const today = format(new Date(), "yyyy-MM-dd");
+    const editingHistoricalStart = Boolean(editingSchedule && editingSchedule.startDate < today && startDate === editingSchedule.startDate);
+    if (editingHistoricalStart) return null;
+    return getScheduleStartTimeError(
+      startDate,
+      format(selectedTime, "HH:mm"),
+      editingSchedule?.type ?? scheduleMode,
+      new Date(),
     );
+  }
 
-    return reminderDate.getTime() <= Date.now();
+  function temporalErrorMessage(type: ScheduleMode, error: "past_date" | "past_time_today" = "past_time_today"): string {
+    if (error === "past_date") return "Choose today or a future date.";
+    return type === "recurring" ? "Choose a later time or a future start date." : "Choose a time later than now.";
   }
 
   async function handleSaveSchedule() {
@@ -316,10 +353,9 @@ export default function ScheduleScreen() {
       return;
     }
 
-    if (scheduleMode === "one_time" && isSelectedOneTimeInThePast()) {
-      setFormMessage(
-        "Choose a time later than now, or choose a future date for this one-time reminder.",
-      );
+    const startTimeError = getSelectedStartTimeError();
+    if (startTimeError) {
+      setFormMessage(temporalErrorMessage(editingSchedule?.type ?? scheduleMode, startTimeError));
       return;
     }
 
@@ -366,10 +402,9 @@ export default function ScheduleScreen() {
   }
 
   function requestSaveSchedule() {
-    if (scheduleMode === "one_time" && isSelectedOneTimeInThePast()) {
-      setFormMessage(
-        "Choose a time later than now, or choose a future date for this one-time reminder.",
-      );
+    const startTimeError = getSelectedStartTimeError();
+    if (startTimeError) {
+      setFormMessage(temporalErrorMessage(editingSchedule?.type ?? scheduleMode, startTimeError));
       return;
     }
 
@@ -417,7 +452,7 @@ export default function ScheduleScreen() {
     }
   }
 
-  async function handlePrivacyChange() {
+  async function handlePrivacyChange(hideName: boolean) {
     if (isChangingPrivacyRef.current) {
       return;
     }
@@ -425,9 +460,9 @@ export default function ScheduleScreen() {
     try {
       isChangingPrivacyRef.current = true;
       setPrivacyMessage(null);
-      await setHideMedicationName(!hideMedicationName);
+      await setHideMedicationName(hideName);
       setPrivacyMessage(
-        !hideMedicationName
+        hideName
           ? "Privacy is on. Medicine names are hidden in future and existing reminders."
           : "Privacy is off. Medicine names can appear in reminder text.",
       );
@@ -635,7 +670,7 @@ export default function ScheduleScreen() {
             <DateTimePicker
               value={selectedDate}
               mode="date"
-              minimumDate={scheduleMode === "one_time" ? new Date() : undefined}
+              minimumDate={!editingSchedule ? localStartOfToday() : undefined}
               onValueChange={handleDateValueChange}
               onDismiss={() => setShowDatePicker(false)}
             />
@@ -803,27 +838,29 @@ export default function ScheduleScreen() {
       ) : null}
 
       <Text style={styles.label}>Lock-screen privacy</Text>
-      <Pressable
-        accessibilityRole="switch"
-        accessibilityLabel="Hide medicine name on lock screen"
-        accessibilityHint="Applies this choice to all active reminders"
-        accessibilityState={{ checked: hideMedicationName, disabled: isLoadingPrivacy }}
-        disabled={isLoadingPrivacy}
-        onPress={handlePrivacyChange}
-        style={[
-          styles.privacyButton,
-          hideMedicationName && styles.privacyButtonEnabled,
-        ]}
-      >
-        <Text style={styles.privacyTitle}>
-          {hideMedicationName ? "Hide medicine name: On" : "Hide medicine name: Off"}
-        </Text>
+      <View style={styles.privacyCard}>
+        <View style={styles.privacyRow}>
+          <Text style={styles.privacyTitle}>Hide medicine name</Text>
+          <Switch
+            accessibilityRole="switch"
+            accessibilityLabel="Hide medicine name"
+            accessibilityHint="Applies this choice to all active reminders"
+            accessibilityState={{ checked: hideMedicationName, disabled: isLoadingPrivacy }}
+            disabled={isLoadingPrivacy}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onValueChange={(value) => { void handlePrivacyChange(value); }}
+            trackColor={{ false: colors.borderStrong, true: colors.primaryBackground }}
+            thumbColor={hideMedicationName ? colors.onPrimary : colors.surface}
+            ios_backgroundColor={colors.surfaceMuted}
+            value={hideMedicationName}
+          />
+        </View>
         <Text style={styles.privacyDescription}>
           {hideMedicationName
-            ? "Notifications use general reminder text."
-            : "Notifications can show the medicine name."}
+            ? "Medication names stay hidden in lock-screen notifications."
+            : "Medication names may appear in notifications."}
         </Text>
-      </Pressable>
+      </View>
 
       {privacyMessage ? (
         <Text accessibilityLiveRegion="polite" style={styles.privacyMessage}>
@@ -1009,9 +1046,9 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   feedbackText: { fontSize: 15, fontWeight: "600", color: colors.badgeTakenForeground },
   feedbackTextError: { color: colors.dangerForeground },
 
-  privacyButton: { minHeight: 72, padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.button, backgroundColor: colors.cardBackground },
-  privacyButtonEnabled: { borderColor: colors.badgeTakenForeground, backgroundColor: colors.badgeTakenBackground },
-  privacyTitle: { fontSize: 16, fontWeight: "700", color: colors.cardForeground },
+  privacyCard: { minHeight: 76, padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.button, backgroundColor: colors.cardBackground },
+  privacyRow: { minHeight: ui.touch.minimum, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  privacyTitle: { flex: 1, fontSize: 16, fontWeight: "700", color: colors.cardForeground },
   privacyDescription: { marginTop: 5, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   privacyMessage: { marginTop: 8, fontSize: 14, lineHeight: 20, color: colors.textMuted },
 

@@ -22,8 +22,8 @@ const badgeColorKeys: Record<BadgeTone, readonly [keyof AppColorTokens, keyof Ap
   expired: ["badgeExpiredBackground", "badgeExpiredForeground"],
 };
 
-export function ThemedChip({ label, selected = false, onPress, accessibilityLabel, disabled = false, style, textStyle }: {
-  label: string; selected?: boolean; onPress: () => void; accessibilityLabel?: string; disabled?: boolean; style?: ViewStyle; textStyle?: TextStyle;
+export function ThemedChip({ label, selected = false, onPress, accessibilityLabel, disabled = false, style, textStyle, hitSlop }: {
+  label: string; selected?: boolean; onPress: () => void; accessibilityLabel?: string; disabled?: boolean; style?: ViewStyle; textStyle?: TextStyle; hitSlop?: number;
 }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -32,6 +32,7 @@ export function ThemedChip({ label, selected = false, onPress, accessibilityLabe
     accessibilityLabel={accessibilityLabel ?? label}
     accessibilityState={{ selected, disabled }}
     disabled={disabled}
+    hitSlop={hitSlop}
     onPress={onPress}
     style={(state: PressableStateCallbackType) => [styles.chip, style, selected && styles.chipSelected, disabled && styles.chipDisabled, state.pressed && !disabled && (selected ? styles.chipSelectedPressed : styles.chipPressed)]}
   >
@@ -48,8 +49,8 @@ export function StatusBadge({ label, tone, style, textStyle }: { label: string; 
   return <Animated.View accessibilityRole="text" accessibilityLabel={`Status: ${label}`} style={[styles.badge, { backgroundColor: colors[backgroundKey] }, style, animatedSurface]}><AnimatedText style={[styles.badgeText, { color: colors[foregroundKey] }, textStyle, animatedText]}>{label}</AnimatedText></Animated.View>;
 }
 
-export function ThemedButton({ label, onPress, tone = "primary", size = "regular", disabled = false, loading = false, loadingLabel, accessibilityLabel, style, textStyle }: {
-  label: string; onPress: () => void; tone?: ButtonTone; size?: "regular" | "compact"; disabled?: boolean; loading?: boolean; loadingLabel?: string; accessibilityLabel?: string; style?: StyleProp<ViewStyle>; textStyle?: TextStyle;
+export function ThemedButton({ label, onPress, tone = "primary", size = "regular", disabled = false, loading = false, loadingLabel, accessibilityLabel, style, textStyle, hitSlop }: {
+  label: string; onPress: () => void; tone?: ButtonTone; size?: "regular" | "compact"; disabled?: boolean; loading?: boolean; loadingLabel?: string; accessibilityLabel?: string; style?: StyleProp<ViewStyle>; textStyle?: TextStyle; hitSlop?: number;
 }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -63,6 +64,7 @@ export function ThemedButton({ label, onPress, tone = "primary", size = "regular
     accessibilityLabel={accessibilityLabel ?? statusLabel}
     accessibilityState={{ disabled: isUnavailable, busy: loading }}
     disabled={isUnavailable}
+    hitSlop={hitSlop}
     onPressIn={() => { pressProgress.value = withTiming(1, { duration: motion.duration.feedback, easing: Easing.bezier(...motion.easing.standard) }); }}
     onPressOut={() => { pressProgress.value = withTiming(0, { duration: motion.duration.feedback, easing: Easing.bezier(...motion.easing.standard) }); }}
     onPress={onPress}
