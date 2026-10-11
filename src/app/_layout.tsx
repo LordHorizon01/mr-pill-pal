@@ -11,6 +11,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type TextStyle,
 } from "react-native";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -308,7 +310,10 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
       <Stack.Screen name="refill-settings" options={{ title: "Refill tracking" }} />
       <Stack.Screen name="stock-history" options={{ title: "Stock history" }} />
       <Stack.Screen name="report-export" options={{ title: "Doctor / caregiver report" }} />
-      <Stack.Screen name="dose-detail" options={{ title: "Dose details" }} />
+      <Stack.Screen name="dose-detail" options={{
+        title: "Dose details",
+        headerTitle: ({ children }) => <StackHeaderTitle style={{ marginLeft: -8 }}>{children}</StackHeaderTitle>,
+      }} />
       <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />
     </Stack></AppDrawerProvider>
@@ -320,9 +325,9 @@ function StackHeaderBackground() {
   return <Animated.View style={[StyleSheet.absoluteFill, colorStyle]} />;
 }
 
-function StackHeaderTitle({ children }: { children: string }) {
+function StackHeaderTitle({ children, style }: { children: string; style?: StyleProp<TextStyle> }) {
   const colorStyle = useAppThemeColorStyle({ color: "textPrimary" });
-  return <Animated.Text numberOfLines={1} style={[{ fontSize: 20, fontWeight: "700" }, colorStyle]}>{children}</Animated.Text>;
+  return <Animated.Text numberOfLines={1} style={[{ fontSize: 20, fontWeight: "700" }, colorStyle, style]}>{children}</Animated.Text>;
 }
 
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({

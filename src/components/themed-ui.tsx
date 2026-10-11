@@ -22,8 +22,8 @@ const badgeColorKeys: Record<BadgeTone, readonly [keyof AppColorTokens, keyof Ap
   expired: ["badgeExpiredBackground", "badgeExpiredForeground"],
 };
 
-export function ThemedChip({ label, selected = false, onPress, accessibilityLabel, disabled = false, style, textStyle, hitSlop }: {
-  label: string; selected?: boolean; onPress: () => void; accessibilityLabel?: string; disabled?: boolean; style?: ViewStyle; textStyle?: TextStyle; hitSlop?: number;
+export function ThemedChip({ label, selected = false, onPress, accessibilityLabel, disabled = false, style, textStyle, hitSlop, allowTextWrap = false }: {
+  label: string; selected?: boolean; onPress: () => void; accessibilityLabel?: string; disabled?: boolean; style?: ViewStyle; textStyle?: TextStyle; hitSlop?: number; allowTextWrap?: boolean;
 }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -36,7 +36,7 @@ export function ThemedChip({ label, selected = false, onPress, accessibilityLabe
     onPress={onPress}
     style={(state: PressableStateCallbackType) => [styles.chip, style, selected && styles.chipSelected, disabled && styles.chipDisabled, state.pressed && !disabled && (selected ? styles.chipSelectedPressed : styles.chipPressed)]}
   >
-    {(state: PressableStateCallbackType) => <Text numberOfLines={1} style={[styles.chipText, textStyle, selected && styles.chipTextSelected, disabled && styles.chipTextDisabled, state.pressed && !disabled && (selected ? styles.chipTextSelectedPressed : styles.chipTextPressed)]}>{label}</Text>}
+    {(state: PressableStateCallbackType) => <Text numberOfLines={allowTextWrap ? undefined : 1} style={[styles.chipText, textStyle, allowTextWrap && styles.chipTextWrap, selected && styles.chipTextSelected, disabled && styles.chipTextDisabled, state.pressed && !disabled && (selected ? styles.chipTextSelectedPressed : styles.chipTextPressed)]}>{label}</Text>}
   </Pressable>;
 }
 
@@ -107,6 +107,7 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   chipSelectedPressed: { borderColor: colors.chipSelectedPressedBackground, backgroundColor: colors.chipSelectedPressedBackground },
   chipDisabled: { borderColor: colors.chipDisabledBorder, backgroundColor: colors.chipDisabledBackground },
   chipText: { ...ui.typography.label, color: colors.chipForeground },
+  chipTextWrap: { flexShrink: 1 },
   chipTextSelected: { color: colors.chipSelectedForeground },
   chipTextPressed: { color: colors.chipPressedForeground },
   chipTextSelectedPressed: { color: colors.chipSelectedPressedForeground },

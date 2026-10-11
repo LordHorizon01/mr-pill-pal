@@ -22,6 +22,7 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 const statuses: HistoryStatusFilter[] = ["all", "taken", "skipped", "missed"];
 const ranges = ["all", "today", "week"] as const;
+const historySeparatorStyles = StyleSheet.create({ record: { height: 8 }, dateGroup: { height: 14 } });
 function displayTime(value: string) { const [hours, minutes] = value.split(":").map(Number); return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
 
 export default function HistoryScreen() {
@@ -49,11 +50,91 @@ export default function HistoryScreen() {
   const changeRange = (value: (typeof ranges)[number]) => { resetAccordion(); setRange(value); };
   const changeMedication = (value?: string) => { resetAccordion(); setMedicationId(value); };
   const confirmDelete = (dose: HistoryDose) => Alert.alert("Delete history record?", "This will permanently remove this intake record from your history. This action cannot be undone.", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => void deleteHistoryRecord(dose).catch(() => undefined) }]);
-  return <TabContentTransition style={styles.container}><ScreenHeader title="History" /><View style={styles.container}><SectionList ref={listRef} sections={sections} keyExtractor={(item) => item.id} refreshing={userPullRefreshing} onRefresh={refreshFromPull} contentContainerStyle={styles.list} stickySectionHeadersEnabled={false} renderSectionHeader={({ section }) => <DateHeader group={section} expanded={expandedDate === section.date} onPress={() => setExpandedDate((value) => toggleExpandedHistoryDate(value, section.date))} />} renderItem={({ item }) => <HistoryCard dose={item} deleting={deletingDoseId === item.id} onDelete={confirmDelete} />} ListHeaderComponent={<><Text style={styles.subtitle}>Your saved medication records</Text><Text style={styles.filterLabel}>Status</Text><View style={styles.chips}>{statuses.map((value) => <FilterChip key={value} selected={status === value} label={value === "all" ? "All" : value[0].toUpperCase() + value.slice(1)} onPress={() => changeStatus(value)} />)}</View><Text style={styles.filterLabel}>Date</Text><View style={styles.chips}>{ranges.map((value) => <FilterChip key={value} selected={range === value} label={value === "all" ? "All dates" : value === "today" ? "Today" : "Last 7 days"} onPress={() => changeRange(value)} />)}</View><Text style={styles.filterLabel}>Medication</Text><View style={styles.chips}><FilterChip selected={!medicationId} label="All medicines" onPress={() => changeMedication()} />{medications.slice(0, 6).map((medication) => <FilterChip key={medication.id} selected={medicationId === medication.id} label={medication.name} onPress={() => changeMedication(medication.id)} />)}</View>{error ? <Pressable onPress={clearError} style={styles.error} accessibilityRole="button" accessibilityLabel={`${error}. Tap to dismiss.`}><Text accessibilityRole="alert" style={styles.errorText}>{error}</Text><Text>Tap to dismiss</Text></Pressable> : null}</>} ListEmptyComponent={showFirstScopeSkeleton ? <ContentFade key="history-skeleton" duration={motion.duration.skeletonCrossfade}><HistoryListSkeleton /></ContentFade> : hasCurrentHistoryContent ? <ContentFade key="history-empty" duration={motion.duration.skeletonCrossfade}><View style={styles.empty}><Text style={styles.name}>No dose history yet.</Text><Text style={styles.subtitle}>Recorded doses will appear here.</Text></View></ContentFade> : null} /></View></TabContentTransition>;
+  return (
+    <TabContentTransition style={styles.container}>
+      <ScreenHeader title="History" />
+      <View style={styles.container}>
+        <SectionList
+          ref={listRef}
+          sections={sections}
+          keyExtractor={(item) => item.id}
+          ItemSeparatorComponent={HistoryRecordSeparator}
+          renderSectionFooter={() => <HistoryDateGroupSeparator />}
+          refreshing={userPullRefreshing}
+          onRefresh={refreshFromPull}
+          contentContainerStyle={styles.list}
+          stickySectionHeadersEnabled={false}
+          renderSectionHeader={({ section }) => (
+            <DateHeader
+              group={section}
+              expanded={expandedDate === section.date}
+              onPress={() => setExpandedDate((value) => toggleExpandedHistoryDate(value, section.date))}
+            />
+          )}
+          renderItem={({ item }) => <HistoryCard dose={item} deleting={deletingDoseId === item.id} onDelete={confirmDelete} />}
+          ListHeaderComponent={
+            <>
+              <Text style={styles.firstFilterLabel}>Status</Text>
+              <View style={styles.chips}>
+                {statuses.map((value) => (
+                  <FilterChip
+                    key={value}
+                    selected={status === value}
+                    label={value === "all" ? "All" : value[0].toUpperCase() + value.slice(1)}
+                    onPress={() => changeStatus(value)}
+                  />
+                ))}
+              </View>
+              <Text style={styles.filterLabel}>Date</Text>
+              <View style={styles.chips}>
+                {ranges.map((value) => (
+                  <FilterChip
+                    key={value}
+                    selected={range === value}
+                    label={value === "all" ? "All dates" : value === "today" ? "Today" : "Last 7 days"}
+                    onPress={() => changeRange(value)}
+                  />
+                ))}
+              </View>
+              <Text style={styles.filterLabel}>Medication</Text>
+              <View style={styles.lastChips}>
+                <FilterChip selected={!medicationId} label="All medicines" onPress={() => changeMedication()} />
+                {medications.slice(0, 6).map((medication) => (
+                  <FilterChip key={medication.id} selected={medicationId === medication.id} label={medication.name} onPress={() => changeMedication(medication.id)} />
+                ))}
+              </View>
+              {error ? (
+                <Pressable onPress={clearError} style={styles.error} accessibilityRole="button" accessibilityLabel={`${error}. Tap to dismiss.`}>
+                  <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>
+                  <Text>Tap to dismiss</Text>
+                </Pressable>
+              ) : null}
+            </>
+          }
+          ListEmptyComponent={
+            showFirstScopeSkeleton ? (
+              <ContentFade key="history-skeleton" duration={motion.duration.skeletonCrossfade}>
+                <HistoryListSkeleton />
+              </ContentFade>
+            ) : hasCurrentHistoryContent ? (
+              <ContentFade key="history-empty" duration={motion.duration.skeletonCrossfade}>
+                <View style={styles.empty}>
+                  <Text style={styles.name}>No dose history yet.</Text>
+                  <Text style={styles.emptySupporting}>Recorded doses will appear here.</Text>
+                </View>
+              </ContentFade>
+            ) : null
+          }
+        />
+      </View>
+    </TabContentTransition>
+  );
 }
 
-function DateHeader({ group, expanded, onPress }: { group: AccordionSection<HistoryDose> & { label: string }; expanded: boolean; onPress: () => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); const action = expanded ? "Collapse" : "Open"; const count = group.recordCount; return <Pressable accessibilityRole="button" accessibilityLabel={`${action} history for ${group.label}, ${count} medication record${count === 1 ? "" : "s"}, ${expanded ? "expanded" : "collapsed"}`} accessibilityState={{ expanded }} onPress={onPress} style={styles.dateHeader}><View style={styles.dateCopy}><Text style={styles.dateHeading}>{group.label}</Text><Text style={styles.count}>{count} record{count === 1 ? "" : "s"}</Text></View><Text accessibilityElementsHidden style={styles.chevron}>{expanded ? "▲" : "▼"}</Text></Pressable>; }
-function FilterChip({ selected, label, onPress }: { selected: boolean; label: string; onPress: () => void }) { return <ThemedChip label={label} selected={selected} onPress={onPress} accessibilityLabel={`${label}${selected ? ", selected" : ""}`} />; }
+function HistoryRecordSeparator() { return <View style={historySeparatorStyles.record} />; }
+function HistoryDateGroupSeparator() { return <View style={historySeparatorStyles.dateGroup} />; }
+function DateHeader({ group, expanded, onPress }: { group: AccordionSection<HistoryDose> & { label: string }; expanded: boolean; onPress: () => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); const action = expanded ? "Collapse" : "Open"; const count = group.recordCount; return <Pressable accessibilityRole="button" accessibilityLabel={`${action} history for ${group.label}, ${count} medication record${count === 1 ? "" : "s"}, ${expanded ? "expanded" : "collapsed"}`} accessibilityState={{ expanded }} onPress={onPress} style={[styles.dateHeader, expanded && styles.expandedDateHeader]}><View style={styles.dateCopy}><Text style={styles.dateHeading}>{group.label}</Text><Text style={styles.count}>{count} record{count === 1 ? "" : "s"}</Text></View><Text accessibilityElementsHidden style={styles.chevron}>{expanded ? "▲" : "▼"}</Text></Pressable>; }
+function FilterChip({ selected, label, onPress }: { selected: boolean; label: string; onPress: () => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); return <ThemedChip label={label} selected={selected} onPress={onPress} accessibilityLabel={`${label}${selected ? ", selected" : ""}`} style={styles.filterChip} textStyle={styles.filterChipText} hitSlop={5} allowTextWrap />; }
 function HistoryCard({ dose, deleting, onDelete }: { dose: HistoryDose; deleting: boolean; onDelete: (dose: HistoryDose) => void }) {
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
@@ -70,4 +151,35 @@ function HistoryCard({ dose, deleting, onDelete }: { dose: HistoryDose; deleting
     </View>
   </View>;
 }
-const createStyles = (colors: AppColorTokens) => StyleSheet.create({ container:{flex:1},list:{padding:ui.spacing.screen,paddingTop:20,paddingBottom:120},subtitle:{marginTop:18,fontSize:16,lineHeight:22,color:colors.muted},filterLabel:{marginTop:ui.spacing.section,fontSize:15,fontWeight:"700",color:colors.textPrimary},chips:{flexDirection:"row",flexWrap:"wrap",gap:8,marginTop:9},error:{marginTop:16,padding:14,borderRadius:ui.radius.button,backgroundColor:colors.dangerBackground},errorText:{fontWeight:"700",color:colors.dangerForeground},loader:{marginVertical:32},dateHeader:{minHeight:68,flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginTop:18,marginBottom:8,padding:14,borderWidth:1,borderColor:colors.border,borderRadius:ui.radius.card,backgroundColor:colors.cardBackground},dateCopy:{flex:1,flexShrink:1},dateHeading:{fontSize:18,fontWeight:"700",color:colors.cardForeground},count:{marginTop:3,fontSize:14,color:colors.textMuted},chevron:{marginLeft:12,fontSize:16,fontWeight:"700",color:colors.primary},card:{padding:ui.spacing.card,borderRadius:ui.radius.card,borderWidth:1,borderColor:colors.border,borderTopColor:colors.borderStrong,backgroundColor:colors.cardBackground,marginBottom:12},cardHeader:{flexDirection:"row",alignItems:"flex-start",justifyContent:"space-between",gap:12},cardText:{flex:1,flexShrink:1},name:{fontSize:18,fontWeight:"700",color:colors.cardForeground,flexShrink:1},dosage:{marginTop:3,fontSize:16,color:colors.textSecondary},detail:{marginTop:10,fontSize:15,color:colors.textMuted},cardActions:{flexDirection:"row",gap:16,marginTop:14,alignItems:"center"},textButton:{minHeight:ui.touch.minimum,justifyContent:"center",paddingHorizontal:4},textButtonLabel:{fontWeight:"700",color:colors.outlineForeground},deleteButton:{minHeight:ui.touch.minimum,justifyContent:"center",paddingHorizontal:6},deleteLabel:{fontWeight:"700",color:colors.dangerForeground},empty:{alignItems:"center",paddingVertical:48,gap:8} });
+const createStyles = (colors: AppColorTokens) => StyleSheet.create({
+  container: { flex: 1 },
+  list: { padding: ui.spacing.screen, paddingHorizontal: 20, paddingTop: 0, paddingBottom: 120 },
+  emptySupporting: { marginTop: 6, fontSize: 15, lineHeight: 20, fontWeight: "400", color: colors.textSecondary },
+  firstFilterLabel: { marginTop: 8, fontSize: 14, lineHeight: 18, fontWeight: "600", color: colors.textPrimary },
+  filterLabel: { marginTop: 13, fontSize: 14, lineHeight: 18, fontWeight: "600", color: colors.textPrimary },
+  chips: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 7 },
+  lastChips: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 7, marginBottom: 13 },
+  filterChip: { minHeight: 36, maxWidth: "100%", paddingHorizontal: 13, borderRadius: 999 },
+  filterChipText: { flexShrink: 1, textAlign: "center", fontSize: 14, lineHeight: 18, fontWeight: "600" },
+  error: { marginTop: 16, padding: 14, borderRadius: ui.radius.button, backgroundColor: colors.dangerBackground },
+  errorText: { fontWeight: "700", color: colors.dangerForeground },
+  loader: { marginVertical: 32 },
+  dateHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.cardBackground },
+  expandedDateHeader: { marginBottom: 8 },
+  dateCopy: { flex: 1, flexShrink: 1 },
+  dateHeading: { fontSize: 19, lineHeight: 24, fontWeight: "600", color: colors.cardForeground },
+  count: { marginTop: 3, fontSize: 13, lineHeight: 18, color: colors.textMuted },
+  chevron: { marginLeft: 12, fontSize: 16, fontWeight: "700", color: colors.primary },
+  card: { padding: ui.spacing.card, borderRadius: ui.radius.card, borderWidth: 1, borderColor: colors.border, borderTopColor: colors.borderStrong, backgroundColor: colors.cardBackground },
+  cardHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  cardText: { flex: 1, flexShrink: 1 },
+  name: { fontSize: 18, fontWeight: "700", color: colors.cardForeground, flexShrink: 1 },
+  dosage: { marginTop: 3, fontSize: 16, color: colors.textSecondary },
+  detail: { marginTop: 10, fontSize: 15, color: colors.textMuted },
+  cardActions: { flexDirection: "row", gap: 16, marginTop: 14, alignItems: "center" },
+  textButton: { minHeight: ui.touch.minimum, justifyContent: "center", paddingHorizontal: 4 },
+  textButtonLabel: { fontWeight: "700", color: colors.outlineForeground },
+  deleteButton: { minHeight: ui.touch.minimum, justifyContent: "center", paddingHorizontal: 6 },
+  deleteLabel: { fontWeight: "700", color: colors.dangerForeground },
+  empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
+});
