@@ -59,9 +59,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set({ isLoading: true, error: null });
 
     try {
-      await refreshAllReminderPrivacy(hideMedicationName);
       await saveHideMedicationName(hideMedicationName);
-      set({ hideMedicationName, isLoading: false });
+      set({ hideMedicationName });
+      await refreshAllReminderPrivacy(hideMedicationName);
+      set({ isLoading: false });
     } catch (error) {
       const message = getSafeDatabaseErrorMessage(
         error,

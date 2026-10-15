@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createNotificationOccurrenceKey,
   getScheduleEditStatusAfterPersist,
+  getScheduleStartTimeError,
   hasScheduleChanges,
   isOneTimeScheduleInFuture,
   isReminderRegistrationHealthy,
@@ -58,6 +59,26 @@ test("one-time update boundary rejects current/past time and accepts future time
   assert.equal(isOneTimeScheduleInFuture("2026-09-10", "09:59", now), false);
   assert.equal(isOneTimeScheduleInFuture("2026-09-10", "10:01", now), true);
   assert.equal(isOneTimeScheduleInFuture("2026-09-11", "00:01", now), true);
+});
+
+test("new schedules reject a start date before today", () => {
+  const now = new Date(2026, 8, 26, 18, 38, 0, 0);
+  assert.equal(getScheduleStartTimeError("2026-09-25", "23:59", "one_time", now), "past_date");
+  assert.equal(getScheduleStartTimeError("2026-09-25", "23:59", "recurring", now), "past_date");
+});
+
+test("new schedules reject an elapsed or equal time today and accept a later time", () => {
+  const now = new Date(2026, 8, 26, 18, 38, 0, 0);
+  assert.equal(getScheduleStartTimeError("2026-09-26", "18:37", "one_time", now), "past_time_today");
+  assert.equal(getScheduleStartTimeError("2026-09-26", "18:38", "recurring", now), "past_time_today");
+  assert.equal(getScheduleStartTimeError("2026-09-26", "19:00", "one_time", now), null);
+  assert.equal(getScheduleStartTimeError("2026-09-26", "19:00", "recurring", now), null);
+});
+
+test("a future start date accepts an earlier clock time for once and repeating schedules", () => {
+  const now = new Date(2026, 8, 26, 18, 38, 0, 0);
+  assert.equal(getScheduleStartTimeError("2026-09-27", "08:00", "one_time", now), null);
+  assert.equal(getScheduleStartTimeError("2026-09-27", "08:00", "recurring", now), null);
 });
 
 test("reminder health labels are based on real overview states", () => {

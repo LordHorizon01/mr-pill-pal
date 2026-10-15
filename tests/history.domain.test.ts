@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canDeleteHistoryStatus, groupHistoryByLocalDate } from "../src/features/history/history.domain";
+import { canDeleteHistoryStatus, getHistoryQueryKey, groupHistoryByLocalDate, isHistoryQueryCurrent } from "../src/features/history/history.domain";
 import { HistoryDose } from "../src/features/history/history.types";
 
 function historyDose(id: string, scheduledDate: string): HistoryDose {
@@ -25,6 +25,13 @@ test("only finalized dose records are eligible for History deletion", () => {
   assert.equal(canDeleteHistoryStatus("skipped"), true);
   assert.equal(canDeleteHistoryStatus("missed"), true);
   assert.equal(canDeleteHistoryStatus("pending"), false);
+});
+
+test("history cache is usable only for the exact loaded filter scope", () => {
+  const loaded = getHistoryQueryKey({ status: "taken", fromDate: "2026-10-01", toDate: "2026-10-04" });
+  assert.equal(isHistoryQueryCurrent(loaded, { status: "taken", fromDate: "2026-10-01", toDate: "2026-10-04" }), true);
+  assert.equal(isHistoryQueryCurrent(loaded, { status: "skipped", fromDate: "2026-10-01", toDate: "2026-10-04" }), false);
+  assert.equal(isHistoryQueryCurrent(null, {}), false);
 });
 
 test("History grouping remains correct and does not mutate a 1,000-record result", () => {

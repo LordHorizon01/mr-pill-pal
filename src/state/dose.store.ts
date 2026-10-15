@@ -31,6 +31,7 @@ function getSafeDoseErrorMessage(error: unknown, fallback: string): string {
 interface DoseState {
   profileId: string | null;
   selectedDate: string;
+  loadedDate: string | null;
   doses: TodayDose[];
   isLoading: boolean;
   updatingDoseId: string | null;
@@ -47,6 +48,7 @@ interface DoseState {
 export const useDoseStore = create<DoseState>((set, get) => ({
   profileId: null,
   selectedDate: toLocalDateString(),
+  loadedDate: null,
   doses: [],
   isLoading: false,
   updatingDoseId: null,
@@ -54,14 +56,15 @@ export const useDoseStore = create<DoseState>((set, get) => ({
 
   loadDoses: async (date) => {
     const requestRevision = doseLoadGuard.begin();
-    if (!get().profileId) { set({ doses: [], isLoading: false, error: null }); return; }
+    const profileId = get().profileId;
+    if (!profileId) { set({ doses: [], loadedDate: null, isLoading: false, error: null }); return; }
     const selectedDate = date ?? get().selectedDate;
     set({ isLoading: true, error: null, selectedDate });
 
     try {
-      const doses = await getDosesForDate(get().profileId!, selectedDate);
+      const doses = await getDosesForDate(profileId, selectedDate);
       if (!doseLoadGuard.isCurrent(requestRevision)) return;
-      set({ doses, isLoading: false });
+      set({ doses, loadedDate: selectedDate, isLoading: false });
     } catch (error) {
       if (!doseLoadGuard.isCurrent(requestRevision)) return;
       set({
@@ -136,6 +139,6 @@ export const useDoseStore = create<DoseState>((set, get) => ({
   clearError: () => set({ error: null }),
   setProfile: (profileId) => {
     doseLoadGuard.invalidate();
-    set({ profileId, doses: [], selectedDate: toLocalDateString(), error: null, isLoading: false, updatingDoseId: null });
+    set({ profileId, doses: [], loadedDate: null, selectedDate: toLocalDateString(), error: null, isLoading: false, updatingDoseId: null });
   },
 }));

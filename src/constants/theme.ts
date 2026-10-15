@@ -6,22 +6,22 @@
 import '@/global.css';
 
 import { Platform } from 'react-native';
+import { AppColorTokens, darkUiColors, ui } from '@/components/ui-tokens';
+
+function legacyColors(colors: AppColorTokens) {
+  return {
+    text: colors.textPrimary,
+    background: colors.background,
+    backgroundElement: colors.surface,
+    backgroundSelected: colors.surfaceMuted,
+    textSecondary: colors.textSecondary,
+  };
+}
 
 export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+  // Compatibility shape for older components; palette values live in ui-tokens.
+  light: legacyColors(ui.colors),
+  dark: legacyColors(darkUiColors),
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
@@ -52,12 +52,13 @@ export const Fonts = Platform.select({
 });
 
 export const Spacing = {
+  // Legacy names are kept for existing starter components; new UI should use ui.spacing.
   half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
+  one: ui.spacing.xxs,
+  two: ui.spacing.xs,
+  three: ui.spacing.md,
+  four: ui.spacing.xl,
+  five: ui.spacing.xxl,
   six: 64,
 } as const;
 

@@ -3,7 +3,7 @@ import { CreateProfileInput, Profile } from "./profile.types";
 
 type ProfileRow = {
   id: string; account_uid: string; full_name: string; nickname: string | null; date_of_birth: string;
-  relationship: Profile["relationship"]; avatar_url: string | null; medical_details_json: string | null;
+  relationship: Profile["relationship"]; avatar_url: string | null; medical_details_json: string | null; profile_setup_details_json: string | null;
   role: Profile["role"]; is_active: number; deleted_at: string | null; created_at: string; updated_at: string;
 };
 
@@ -17,6 +17,7 @@ function mapProfile(row: ProfileRow): Profile {
     id: row.id, accountUid: row.account_uid, fullName: row.full_name, nickname: row.nickname ?? undefined,
     dateOfBirth: row.date_of_birth, relationship: row.relationship, avatarUrl: row.avatar_url ?? undefined,
     medicalDetails: row.medical_details_json ? JSON.parse(row.medical_details_json) : undefined,
+    profileSetupDetails: row.profile_setup_details_json ? JSON.parse(row.profile_setup_details_json) : undefined,
     role: row.role, accessLevel: "OWNER", isActive: row.is_active === 1, deletedAt: row.deleted_at ?? undefined,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
@@ -24,11 +25,12 @@ function mapProfile(row: ProfileRow): Profile {
 
 export async function saveLocalProfile(profile: Profile): Promise<void> {
   await runDatabaseOperation(async (db) => {
-    await db.runAsync(`INSERT INTO local_profiles (id, account_uid, full_name, nickname, date_of_birth, relationship, avatar_url, medical_details_json, role, is_active, deleted_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET account_uid=excluded.account_uid, full_name=excluded.full_name, nickname=excluded.nickname, date_of_birth=excluded.date_of_birth, relationship=excluded.relationship, avatar_url=excluded.avatar_url, medical_details_json=excluded.medical_details_json, role=excluded.role, is_active=excluded.is_active, deleted_at=excluded.deleted_at, updated_at=excluded.updated_at`,
+    await db.runAsync(`INSERT INTO local_profiles (id, account_uid, full_name, nickname, date_of_birth, relationship, avatar_url, medical_details_json, profile_setup_details_json, role, is_active, deleted_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET account_uid=excluded.account_uid, full_name=excluded.full_name, nickname=excluded.nickname, date_of_birth=excluded.date_of_birth, relationship=excluded.relationship, avatar_url=excluded.avatar_url, medical_details_json=excluded.medical_details_json, profile_setup_details_json=COALESCE(excluded.profile_setup_details_json, local_profiles.profile_setup_details_json), role=excluded.role, is_active=excluded.is_active, deleted_at=excluded.deleted_at, updated_at=excluded.updated_at`,
     [profile.id, profile.accountUid, profile.fullName, profile.nickname ?? null, profile.dateOfBirth, profile.relationship,
-      profile.avatarUrl ?? null, profile.medicalDetails ? JSON.stringify(profile.medicalDetails) : null, profile.role,
+      profile.avatarUrl ?? null, profile.medicalDetails ? JSON.stringify(profile.medicalDetails) : null,
+      profile.profileSetupDetails ? JSON.stringify(profile.profileSetupDetails) : null, profile.role,
       profile.isActive ? 1 : 0, profile.deletedAt ?? null, profile.createdAt, profile.updatedAt]);
   });
 }

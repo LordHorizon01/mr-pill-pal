@@ -21,6 +21,7 @@ function mapRemote(id: string, data: FirestoreProfile): Profile {
     ...profileData,
     id,
     accountUid: ownerUid,
+    dateOfBirth: data.dateOfBirth ?? "",
     accessLevel: "OWNER",
     createdAt: data.createdAt?.toDate().toISOString() ?? new Date().toISOString(),
     updatedAt: data.updatedAt?.toDate().toISOString() ?? new Date().toISOString(),
@@ -57,9 +58,11 @@ export async function createRemoteProfile(
     accountUid,
     fullName: input.fullName,
     ...(input.nickname ? { nickname: input.nickname } : {}),
-    dateOfBirth: input.dateOfBirth,
+    dateOfBirth: input.dateOfBirth ?? "",
     relationship: input.relationship,
+    ...(input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
     ...(input.medicalDetails ? { medicalDetails: input.medicalDetails } : {}),
+    ...(input.profileSetupDetails ? { profileSetupDetails: input.profileSetupDetails } : {}),
     role: input.relationship === "Self" ? "SELF" : "DEPENDENT",
     accessLevel: "OWNER",
     isActive: true,
@@ -102,7 +105,17 @@ export async function updateRemoteProfile(accountUid: string, profileId: string,
   const reference = profileReference(profileId);
   const snapshot = await firestore.getDoc(reference);
   if (!snapshot.exists() || snapshot.data()?.ownerUid !== accountUid) throw new Error("This profile is not available for this account.");
-  await firestore.updateDoc(reference, { fullName: input.fullName, nickname: input.nickname ?? null, dateOfBirth: input.dateOfBirth, relationship: input.relationship, medicalDetails: input.medicalDetails ?? null, isActive: input.isActive ?? true, updatedAt: firestore.serverTimestamp() });
+  await firestore.updateDoc(reference, {
+    fullName: input.fullName,
+    nickname: input.nickname ?? null,
+    dateOfBirth: input.dateOfBirth ?? "",
+    avatarUrl: input.avatarUrl ?? null,
+    relationship: input.relationship,
+    medicalDetails: input.medicalDetails ?? null,
+    ...(input.profileSetupDetails ? { profileSetupDetails: input.profileSetupDetails } : {}),
+    isActive: input.isActive ?? true,
+    updatedAt: firestore.serverTimestamp(),
+  });
 }
 
 export async function deactivateRemoteProfile(accountUid: string, profileId: string): Promise<void> {

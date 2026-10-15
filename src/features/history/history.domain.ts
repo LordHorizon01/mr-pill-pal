@@ -1,6 +1,21 @@
 import { addDaysToLocalDate, toLocalDateString } from "../doses/dose.domain";
 import { DoseStatus } from "../doses/dose.types";
-import { HistoryDose, HistoryGroup } from "./history.types";
+import { HistoryDose, HistoryGroup, HistoryQuery } from "./history.types";
+
+export function getHistoryQueryKey(query: HistoryQuery): string {
+  return JSON.stringify([
+    query.status ?? "all",
+    query.medicationId ?? null,
+    query.fromDate ?? null,
+    query.toDate ?? null,
+    query.limit ?? null,
+    query.offset ?? null,
+  ]);
+}
+
+export function isHistoryQueryCurrent(loadedQueryKey: string | null, query: HistoryQuery): boolean {
+  return loadedQueryKey !== null && loadedQueryKey === getHistoryQueryKey(query);
+}
 
 export function canDeleteHistoryStatus(status: DoseStatus): boolean {
   return status === "taken" || status === "skipped" || status === "missed";

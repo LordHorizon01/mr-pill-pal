@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, Share, StyleSheet, Tex
 import { useFocusEffect } from "expo-router";
 
 import { ThemedButton, ThemedCard, ThemedChip } from "@/components/themed-ui";
-import { AppColorTokens, ui } from "@/components/ui-tokens";
+import { AppColorTokens, getButtonColorRoles, ui } from "@/components/ui-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import {
   formatMedicationReportForSharing,
@@ -156,14 +156,11 @@ export default function ReportExportScreen() {
 
   return <>
   <ScrollView contentContainerStyle={styles.page}>
-    <Text accessibilityRole="header" style={styles.title}>Doctor / caregiver report</Text>
-    <Text style={styles.subtitle}>Create a factual summary from medication and intake records stored in Mr. Pill Pal. This report does not provide medical advice.</Text>
-
-    <Text style={styles.sectionLabel}>Period</Text>
-    <View style={styles.chips}>{presets.map((item) => <ThemedChip key={item.value} label={item.label} selected={preset === item.value} onPress={() => changePreset(item.value)} accessibilityLabel={`${item.label} report period${preset === item.value ? ", selected" : ""}`} />)}</View>
+    <Text style={styles.periodLabel}>Period</Text>
+    <View style={styles.chips}>{presets.map((item) => <ThemedChip key={item.value} label={item.label} selected={preset === item.value} onPress={() => changePreset(item.value)} accessibilityLabel={`${item.label} report period${preset === item.value ? ", selected" : ""}`} style={styles.periodChip} textStyle={styles.periodChipText} hitSlop={4} allowTextWrap />)}</View>
 
     {isLoading && !report ? <ActivityIndicator size="large" style={styles.loader} /> : null}
-    {error ? <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorTitle}>{error}</Text>{canRetryLoad ? <Pressable accessibilityRole="button" accessibilityLabel="Try loading the report again" onPress={() => load()} style={styles.retryButton}><Text style={styles.errorHint}>Try loading again</Text></Pressable> : null}</View> : null}
+    {error ? <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorTitle}>{error}</Text>{canRetryLoad ? <ThemedButton label="Try again" size="compact" tone="outline" accessibilityLabel="Try loading the report again" onPress={() => load()} style={{ alignSelf: "flex-start" }} /> : null}</View> : null}
 
     {report ? <>
       <ThemedCard style={styles.card}>
@@ -198,7 +195,22 @@ export default function ReportExportScreen() {
       </ThemedCard>)}
 
       <ThemedCard style={styles.privacyCard}><Text style={styles.privacyTitle}>Privacy note</Text><Text style={styles.helper}>This report may contain personal medication information. Share it only with people you trust.</Text></ThemedCard>
-      <ThemedButton label={shareOperation === "pdf" ? "Preparing PDF…" : "Share report"} onPress={openShareChooser} loading={Boolean(shareOperation)} disabled={isLoading || Boolean(shareOperation)} accessibilityLabel="Share doctor or caregiver report" style={styles.shareButton} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Share doctor or caregiver report"
+        accessibilityState={{ disabled: isLoading || Boolean(shareOperation), busy: Boolean(shareOperation) }}
+        disabled={isLoading || Boolean(shareOperation)}
+        onPress={openShareChooser}
+        style={({ pressed }) => {
+          const state = isLoading || shareOperation ? "disabled" : pressed ? "pressed" : "default";
+          const roles = getButtonColorRoles("primary", state);
+          return [styles.shareButton, { backgroundColor: colors[roles.background], borderColor: colors[roles.border] }];
+        }}
+      >
+        <Text style={[styles.shareButtonText, { color: colors[getButtonColorRoles("primary", isLoading || shareOperation ? "disabled" : "default").foreground] }]}>
+          {shareOperation ? shareOperation === "pdf" ? "Preparing PDF…" : "Preparing report…" : "Share report"}
+        </Text>
+      </Pressable>
     </> : null}
   </ScrollView>
   <Modal visible={isShareChooserVisible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setIsShareChooserVisible(false)}>
@@ -207,8 +219,8 @@ export default function ReportExportScreen() {
       <View accessibilityViewIsModal accessibilityLabel="Share report options" style={styles.modalCard}>
         <Text accessibilityRole="header" style={styles.modalTitle}>Share report</Text>
         <Text style={styles.modalDescription}>Choose how you want to share this report.</Text>
-        <ThemedButton label="Share as PDF" onPress={() => chooseShareFormat("pdf")} accessibilityLabel="Share report as PDF" style={styles.modalAction} />
-        <ThemedButton label="Share as text" onPress={() => chooseShareFormat("text")} tone="outline" accessibilityLabel="Share report as text" style={styles.modalAction} />
+        <ReportShareChoiceButton label="Share as PDF" tone="primary" onPress={() => chooseShareFormat("pdf")} accessibilityLabel="Share report as PDF" />
+        <ReportShareChoiceButton label="Share as text" tone="outline" onPress={() => chooseShareFormat("text")} accessibilityLabel="Share report as text" />
         <Pressable accessibilityRole="button" accessibilityLabel="Cancel sharing" onPress={() => setIsShareChooserVisible(false)} style={styles.modalCancel}>
           <Text style={styles.modalCancelText}>Cancel</Text>
         </Pressable>
@@ -223,38 +235,56 @@ function ReportDetail({ label, value }: { label: string; value: string }) {
   return <View style={styles.detail}><Text style={styles.detailLabel}>{label}</Text><Text style={styles.detailValue}>{value}</Text></View>;
 }
 
+function ReportShareChoiceButton({ label, tone, onPress, accessibilityLabel }: { label: string; tone: "primary" | "outline"; onPress: () => void; accessibilityLabel: string }) {
+  const { colors } = useAppTheme();
+  const styles = createStyles(colors);
+  return <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel}
+    onPress={onPress}
+    style={({ pressed }) => {
+      const roles = getButtonColorRoles(tone, pressed ? "pressed" : "default");
+      return [styles.modalAction, tone === "outline" && styles.modalActionOutline, { backgroundColor: colors[roles.background], borderColor: colors[roles.border] }];
+    }}
+  >
+    <Text style={[styles.modalActionText, { color: colors[getButtonColorRoles(tone).foreground] }]}>{label}</Text>
+  </Pressable>;
+}
+
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
-  page: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 120, backgroundColor: colors.background },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: "700", color: colors.textPrimary },
-  subtitle: { marginTop: 10, fontSize: 16, lineHeight: 23, color: colors.textSecondary },
-  sectionLabel: { marginTop: ui.spacing.section, fontSize: 16, fontWeight: "700", color: colors.textPrimary },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  loader: { marginTop: 48 },
-  error: { marginTop: ui.spacing.section, padding: ui.spacing.card, borderRadius: ui.radius.card, backgroundColor: colors.dangerBackground },
+  page: { paddingHorizontal: ui.spacing.screen, paddingTop: 10, paddingBottom: 120, backgroundColor: colors.background },
+  periodLabel: { fontSize: 16, fontWeight: "700", color: colors.textPrimary },
+  sectionLabel: { marginTop: 12, fontSize: 16, fontWeight: "700", color: colors.textPrimary },
+  chips: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8 },
+  periodChip: { minHeight: 36, paddingHorizontal: 12 },
+  periodChipText: { fontSize: 14, lineHeight: 18, fontWeight: "600" },
+  loader: { marginTop: 28 },
+  error: { marginTop: 12, padding: 14, borderRadius: ui.radius.card, backgroundColor: colors.dangerBackground },
   errorTitle: { fontSize: 16, fontWeight: "700", color: colors.dangerForeground },
-  errorHint: { marginTop: 5, color: colors.textMuted },
-  retryButton: { minHeight: ui.touch.minimum, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 4 },
-  card: { marginTop: ui.spacing.section },
-  cardTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
-  detail: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 14, borderBottomWidth: 1, borderBottomColor: colors.divider },
-  detailLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: colors.textSecondary },
-  detailValue: { flex: 1, flexShrink: 1, textAlign: "right", fontSize: 15, color: colors.textPrimary },
-  adherence: { marginTop: 14, fontSize: 20, fontWeight: "800", color: colors.primary },
-  helper: { marginTop: 8, fontSize: 14, lineHeight: 20, color: colors.textMuted },
-  emptyText: { marginTop: 12, fontSize: 16, lineHeight: 22, color: colors.textSecondary },
-  medicationCard: { marginTop: 12 },
-  medicationName: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
-  dosage: { marginTop: 3, fontSize: 16, color: colors.textSecondary },
-  lifecycle: { marginTop: 10, fontSize: 15, fontWeight: "700", color: colors.primary },
-  counts: { marginTop: 12, fontSize: 15, lineHeight: 22, color: colors.textPrimary },
-  privacyCard: { marginTop: ui.spacing.section, backgroundColor: colors.secondaryBackground },
+  card: { marginTop: 12, padding: 12, borderRadius: 16 },
+  cardTitle: { marginBottom: 4, fontSize: 16, lineHeight: 22, fontWeight: "700", color: colors.cardForeground },
+  detail: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.borderStrong },
+  detailLabel: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 19, fontWeight: "600", color: colors.textPrimary },
+  detailValue: { flex: 1, minWidth: 0, flexShrink: 1, textAlign: "right", fontSize: 14, lineHeight: 19, fontWeight: "700", color: colors.textPrimary },
+  adherence: { marginTop: 8, fontSize: 17, lineHeight: 24, fontWeight: "700", color: colors.primary },
+  helper: { marginTop: 4, fontSize: 14, lineHeight: 19, color: colors.textSecondary },
+  emptyText: { marginTop: 8, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
+  medicationCard: { marginTop: 10, padding: 12, borderRadius: 16 },
+  medicationName: { fontSize: 16, lineHeight: 21, fontWeight: "700", color: colors.cardForeground },
+  dosage: { marginTop: 2, fontSize: 14, lineHeight: 19, color: colors.textSecondary },
+  lifecycle: { marginTop: 6, fontSize: 14, lineHeight: 19, fontWeight: "700", color: colors.primary },
+  counts: { marginTop: 8, fontSize: 14, lineHeight: 20, color: colors.textPrimary },
+  privacyCard: { marginTop: 12, padding: 12, borderRadius: 16, backgroundColor: colors.secondaryBackground },
   privacyTitle: { fontSize: 16, fontWeight: "700", color: colors.secondaryForeground },
-  shareButton: { marginTop: ui.spacing.section },
+  shareButton: { alignSelf: "center", marginTop: 12, minHeight: 48, justifyContent: "center", alignItems: "center", paddingHorizontal: 19, paddingVertical: 12, borderWidth: 1, borderRadius: 11 },
+  shareButtonText: { fontSize: 15, lineHeight: 20, fontWeight: "700", textAlign: "center" },
   modalRoot: { flex: 1, justifyContent: "center", alignItems: "center", padding: ui.spacing.screen, backgroundColor: "rgba(0, 0, 0, 0.48)" },
   modalCard: { width: "100%", maxWidth: 420, padding: ui.spacing.card, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.surfaceElevated, elevation: 14 },
   modalTitle: { fontSize: 21, lineHeight: 28, fontWeight: "800", color: colors.textPrimary },
   modalDescription: { marginBottom: 4, fontSize: 16, lineHeight: 23, color: colors.textSecondary },
-  modalAction: { width: "100%" },
+  modalAction: { width: "100%", minHeight: 48, justifyContent: "center", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: ui.radius.button },
+  modalActionOutline: { borderWidth: 1 },
+  modalActionText: { fontSize: 16, lineHeight: 22, fontWeight: "700", textAlign: "center" },
   modalCancel: { minHeight: ui.touch.minimum, justifyContent: "center", alignItems: "center", paddingHorizontal: 16, borderRadius: ui.radius.button },
   modalCancelText: { fontSize: 16, fontWeight: "700", color: colors.outlineForeground },
 });

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   AppState,
   FlatList,
@@ -12,7 +11,6 @@ import {
 import { router, useFocusEffect } from "expo-router";
 
 import {
-  addDaysToLocalDate,
   toLocalDateString,
 } from "@/features/doses/dose.service";
 import { getDosePresentationState } from "@/features/doses/dose.domain";
@@ -20,15 +18,23 @@ import { TodayDose } from "@/features/doses/dose.types";
 import { useDoses } from "@/hooks/useDoses";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { ScreenHeader } from "@/components/screen-header";
+import { HomeDateCarousel } from "@/components/home-date-carousel";
+import { motion } from "@/components/motion-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
 import { getHomeGreeting } from "@/features/profiles/profile.domain";
-import { StatusBadge, ThemedButton } from "@/components/themed-ui";
+import { StatusBadge, ThemedButton, ThemedChip } from "@/components/themed-ui";
 import { DoseStatusOverflowSheet } from "@/features/doses/dose-status-overflow-sheet";
 import { shouldShowDoseCorrectionOverflow } from "@/features/doses/dose-card-presentation.domain";
 import { AnchoredMenuAnchor } from "@/components/anchored-action-menu.domain";
+import { ContentFade, DoseListSkeleton, HomeSummarySkeleton } from "@/components/loading-primitives";
+import { TabContentTransition } from "@/components/tab-content-transition";
+import { useDelayedLoading } from "@/hooks/use-delayed-loading";
+import { useUserPullRefresh } from "@/hooks/use-user-pull-refresh";
+import { useDoseStore } from "@/state/dose.store";
 
 const UPCOMING_STATUS_LABEL = "Upcoming";
+type FinalizedDoseFilter = "taken" | "skipped";
 
 function formatDate(dateString: string): string {
   const [year, month, day] = dateString.split("-").map(Number);
@@ -63,8 +69,11 @@ export default function HomeScreen() {
   const profiles = useProfileStore((state) => state.profiles);
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
+  const doseProfileId = useDoseStore((state) => state.profileId);
+  const loadedDate = useDoseStore((state) => state.loadedDate);
+  const todayDate = toLocalDateString();
   const {
-    selectedDate,
+    selectedDate: selectedScheduleDate,
     doses,
     isLoading,
     updatingDoseId,
@@ -75,33 +84,44 @@ export default function HomeScreen() {
     correctStatus,
     clearError,
   } = useDoses();
-  const [showTaken, setShowTaken] = useState(false);
-  const [showSkipped, setShowSkipped] = useState(false);
-  const [showMissed, setShowMissed] = useState(false);
+  const hasCurrentDoseData = doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
+  const delayedLoadingVisible = useDelayedLoading(isLoading && !hasCurrentDoseData);
+  const showFirstScopeSkeleton = !error && !hasCurrentDoseData && delayedLoadingVisible;
+  const hasCurrentDoseContent = hasCurrentDoseData;
+  const visibleDoses = useMemo(() => hasCurrentDoseContent ? doses : [], [doses, hasCurrentDoseContent]);
   const [statusMenuDose, setStatusMenuDose] = useState<TodayDose | null>(null);
   const [statusMenuAnchor, setStatusMenuAnchor] = useState<AnchoredMenuAnchor | null>(null);
+  const [skipConfirmationDoseId, setSkipConfirmationDoseId] = useState<string | null>(null);
+  const [finalizedDoseFilter, setFinalizedDoseFilter] = useState<FinalizedDoseFilter>("taken");
+  const skipConfirmationDoseIdRef = useRef<string | null>(null);
   const statusMenuAnchorRefs = useRef<Record<string, View | null>>({});
-  const pendingDoses = useMemo(() => doses.filter((dose) => dose.status === "pending"), [doses]);
-  const takenDoses = useMemo(() => doses.filter((dose) => dose.status === "taken"), [doses]);
-  const skippedDoses = useMemo(() => doses.filter((dose) => dose.status === "skipped"), [doses]);
-  const missedDoses = useMemo(() => doses.filter((dose) => dose.status === "missed"), [doses]);
+  const pendingDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "pending"), [visibleDoses]);
+  const takenDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "taken"), [visibleDoses]);
+  const skippedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "skipped"), [visibleDoses]);
+  const missedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "missed"), [visibleDoses]);
   const recordedCount = takenDoses.length + skippedDoses.length;
+  const nextDose = pendingDoses[0] ?? null;
+  const finalizedDoses = useMemo(
+    () => visibleDoses.filter((dose) => dose.status === finalizedDoseFilter),
+    [finalizedDoseFilter, visibleDoses],
+  );
 
   const refreshDoses = useCallback(() => {
     void loadDoses();
   }, [loadDoses]);
+  const { refreshing: userPullRefreshing, onRefresh: refreshFromPull } = useUserPullRefresh(loadDoses);
 
   useEffect(() => {
-    setShowTaken(false);
-    setShowSkipped(false);
-    setShowMissed(false);
-    setStatusMenuDose(null);
-    setStatusMenuAnchor(null);
+    const frame = requestAnimationFrame(() => {
+      setStatusMenuDose(null);
+      setStatusMenuAnchor(null);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [selectedProfileId]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshDoses();
+      if (selectedProfileId) refreshDoses();
     }, [refreshDoses, selectedProfileId]),
   );
 
@@ -115,22 +135,39 @@ export default function HomeScreen() {
     return () => subscription.remove();
   }, [refreshDoses]);
 
-  function changeDate(days: number) {
-    void loadDoses(addDaysToLocalDate(selectedDate, days));
-  }
+  const selectScheduleDate = useCallback((date: string) => {
+    if (date !== selectedScheduleDate) void loadDoses(date);
+  }, [loadDoses, selectedScheduleDate]);
 
   function confirmSkipDose(dose: TodayDose) {
+    if (skipConfirmationDoseIdRef.current || useDoseStore.getState().updatingDoseId) {
+      return;
+    }
+
+    skipConfirmationDoseIdRef.current = dose.id;
+    setSkipConfirmationDoseId(dose.id);
+    const releaseSkipConfirmation = () => {
+      if (skipConfirmationDoseIdRef.current === dose.id) {
+        skipConfirmationDoseIdRef.current = null;
+        setSkipConfirmationDoseId(null);
+      }
+    };
+
     Alert.alert(
       "Skip this dose?",
       `Mark ${dose.medicationName} ${dose.medicationDosage} as skipped? You can review it in your intake history later.`,
       [
-        { text: "Cancel", style: "cancel" },
+        { text: "Cancel", style: "cancel", onPress: releaseSkipConfirmation },
         {
           text: "Skip dose",
           style: "destructive",
-          onPress: () => void recordSkipped(dose.id),
+          onPress: () => {
+            releaseSkipConfirmation();
+            void recordSkipped(dose.id);
+          },
         },
       ],
+      { cancelable: true, onDismiss: releaseSkipConfirmation },
     );
   }
 
@@ -144,23 +181,18 @@ export default function HomeScreen() {
     ]);
   }
 
-  function openStatusMenu(dose: TodayDose) {
-    const anchor = statusMenuAnchorRefs.current[dose.id];
-    anchor?.measureInWindow((x, y, width, height) => {
-      setStatusMenuAnchor({ x, y, width, height });
-      setStatusMenuDose(dose);
-    });
-  }
-
-  function renderDose({ item }: { item: TodayDose }) {
+  function renderDose({ item, featured = false, finalized = false }: { item: TodayDose; featured?: boolean; finalized?: boolean }) {
     const isUpdating = updatingDoseId === item.id;
     const isPending = item.status === "pending";
+    const isFinalized = item.status === "taken" || item.status === "skipped";
     const presentation = getDosePresentationState(
       item.status,
       item.scheduledDate,
     );
     const isFutureDose = presentation.label === UPCOMING_STATUS_LABEL;
     const statusLabel = presentation.label;
+    const isSkipConfirmationOpen = skipConfirmationDoseId === item.id;
+    const isActionUnavailable = Boolean(updatingDoseId) || isSkipConfirmationOpen;
     const statusDescription = isFutureDose && isPending
       ? `Upcoming - scheduled for ${formatDate(item.scheduledDate)}`
       : item.status === "taken" && item.takenAt
@@ -175,20 +207,40 @@ export default function HomeScreen() {
     const showsCorrectionOverflow = shouldShowDoseCorrectionOverflow(item.status);
 
     return (
-      <View style={styles.doseCard}>
+      <View style={[styles.doseCard, featured && styles.featuredDose, finalized && styles.finalizedDoseCard]}>
         <View style={styles.cardTopRow}>
           <Text style={styles.time}>{formatTime(item.scheduledTime)}</Text>
-          <StatusBadge label={statusLabel} tone={isFutureDose && isPending ? "upcoming" : item.status} />
+            {isFinalized ? (
+              <View
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={`Status: ${statusLabel}`}
+                style={[styles.finalizedStatusBadge, item.status === "taken" ? styles.takenStatusBadge : styles.skippedStatusBadge]}
+              >
+                <Text style={[styles.finalizedStatusBadgeText, item.status === "taken" ? styles.takenStatusBadgeText : styles.skippedStatusBadgeText]}>{statusLabel}</Text>
+              </View>
+            ) : <StatusBadge label={statusLabel} tone={isFutureDose && isPending ? "upcoming" : item.status} />}
         </View>
 
-        <Text style={styles.medicationName}>{item.medicationName}</Text>
+        <Text style={[styles.medicationName, finalized && styles.finalizedMedicationName]}>{item.medicationName}</Text>
         <Text style={styles.dosage}>{item.medicationDosage}</Text>
 
         {showsCorrectionOverflow ? (
           <View style={styles.finalizedStatusRow}>
-            <Text style={[styles.statusDescription, styles.finalizedStatusDescription]}>{statusDescription}</Text>
+            <Text
+              accessibilityLabel={`${item.medicationName}, scheduled for ${formatTime(item.scheduledTime)}, ${statusDescription}`}
+              style={[styles.statusDescription, styles.finalizedStatusDescription]}
+            >
+              {statusDescription}
+            </Text>
             <View ref={(node) => { statusMenuAnchorRefs.current[item.id] = node; }} collapsable={false}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.medicationName} dose`} onPress={() => openStatusMenu(item)} disabled={Boolean(updatingDoseId)} style={styles.overflowButton}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.medicationName} dose`} onPress={() => {
+                const anchor = statusMenuAnchorRefs.current[item.id];
+                anchor?.measureInWindow((x, y, width, height) => {
+                  setStatusMenuAnchor({ x, y, width, height });
+                  setStatusMenuDose(item);
+                });
+              }} disabled={Boolean(updatingDoseId)} style={styles.overflowButton}>
                 <Text style={styles.overflowText}>⋮</Text>
               </Pressable>
             </View>
@@ -197,8 +249,28 @@ export default function HomeScreen() {
 
         {presentation.canRecord ? (
           <View style={styles.actionRow}>
-            <ThemedButton label={isUpdating ? "Saving..." : "Taken"} loading={isUpdating} accessibilityLabel={`Mark ${item.medicationName} ${item.medicationDosage} as taken`} disabled={Boolean(updatingDoseId)} onPress={() => void recordTaken(item.id)} style={styles.flexAction} />
-            <ThemedButton label="Skip" tone="outline" accessibilityLabel={`Mark ${item.medicationName} ${item.medicationDosage} as skipped`} disabled={Boolean(updatingDoseId)} onPress={() => confirmSkipDose(item)} style={styles.flexAction} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Mark ${item.medicationName} dose as taken`}
+              accessibilityState={{ disabled: isActionUnavailable, busy: isUpdating }}
+              disabled={isActionUnavailable}
+              hitSlop={{ top: 2, bottom: 2 }}
+              onPress={() => void recordTaken(item.id)}
+              style={({ pressed }) => [styles.doseAction, styles.takenAction, pressed && !isActionUnavailable && styles.doseActionPressed, isActionUnavailable && styles.doseActionDisabled]}
+            >
+              <Text style={styles.takenActionLabel}>{isUpdating ? "Saving..." : "Taken"}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Skip ${item.medicationName} dose`}
+              accessibilityState={{ disabled: isActionUnavailable }}
+              disabled={isActionUnavailable}
+              hitSlop={{ top: 2, bottom: 2 }}
+              onPress={() => confirmSkipDose(item)}
+              style={({ pressed }) => [styles.doseAction, styles.skipAction, pressed && !isActionUnavailable && styles.doseActionPressed, isActionUnavailable && styles.doseActionDisabled]}
+            >
+              <Text style={styles.skipActionLabel}>Skip</Text>
+            </Pressable>
           </View>
         ) : null}
       </View>
@@ -206,72 +278,46 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} /><View style={styles.container}>
       <FlatList
-        data={pendingDoses}
+        data={finalizedDoses}
         keyExtractor={(item) => item.id}
-        renderItem={renderDose}
+        renderItem={({ item }) => (
+          <ContentFade key={`${finalizedDoseFilter}-${item.id}`} duration={motion.duration.fast}>
+            <View style={styles.finalizedDoseItem}>{renderDose({ item, finalized: true })}</View>
+          </ContentFade>
+        )}
         contentContainerStyle={styles.listContent}
-        refreshing={isLoading}
-        onRefresh={refreshDoses}
+        refreshing={userPullRefreshing}
+        onRefresh={refreshFromPull}
         ListHeaderComponent={
           <>
-            <View style={styles.header}>
-              <ScreenHeader title="Mr. Pill Pal" />
-              <Text style={styles.greeting}>{getHomeGreeting(selectedProfile)}</Text>
-              <Text style={styles.homeDate}>{formatDate(selectedDate)}</Text>
-              <Text style={styles.offlineHint}>Your medication routine works without internet</Text>
-            </View>
+            <HomeDateCarousel todayDate={todayDate} selectedScheduleDate={selectedScheduleDate} colors={colors} onSelectDate={selectScheduleDate} />
 
-            <View style={styles.dateControls}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Show previous day"
-                onPress={() => changeDate(-1)}
-                style={styles.dateButton}
-              >
-                <Text style={styles.dateButtonText}>Previous</Text>
-              </Pressable>
-
-              <View style={styles.dateCenter}>
-                <Text style={styles.dateLabel}>{formatDate(selectedDate)}</Text>
-                {selectedDate !== toLocalDateString() ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Return to today"
-                    onPress={() => void loadDoses(toLocalDateString())}
-                  >
-                    <Text style={styles.todayLink}>Back to today</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Show next day"
-                onPress={() => changeDate(1)}
-                style={styles.dateButton}
-              >
-                <Text style={styles.dateButtonText}>Next</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.progressCard}>
-              <Text style={styles.progressTitle}>Daily routine</Text>
-              <Text style={styles.progressText}>{recordedCount} of {doses.length} doses recorded</Text>
+            <ContentFade key={hasCurrentDoseContent ? "home-summary-content" : showFirstScopeSkeleton ? "home-summary-skeleton" : "home-summary-wait"} duration={motion.duration.skeletonCrossfade}>{hasCurrentDoseContent ? <View style={styles.progressCard}>
+              <Text style={styles.progressTitle}>Today&apos;s summary</Text>
+              <Text style={styles.progressText}>{recordedCount} of {visibleDoses.length} doses recorded</Text>
               <View style={styles.summaryCounts}>
                 <Text style={styles.summaryText}>Taken {takenDoses.length}</Text>
-                <Text style={styles.summaryText}>Skipped {skippedDoses.length}</Text>
-                <Text style={styles.summaryText}>Pending {pendingDoses.length}</Text>
+                <Text style={styles.summaryText}>Upcoming {pendingDoses.length}</Text>
+                {skippedDoses.length ? <Text style={styles.summaryText}>Skipped {skippedDoses.length}</Text> : null}
                 {missedDoses.length ? <Text style={styles.summaryText}>Missed {missedDoses.length}</Text> : null}
               </View>
-              {pendingDoses[0] ? <Text style={styles.nextText}>Next: {pendingDoses[0].medicationName} at {formatTime(pendingDoses[0].scheduledTime)}</Text> : null}
+            </View> : showFirstScopeSkeleton ? <HomeSummarySkeleton /> : <View style={styles.progressPlaceholder} />}</ContentFade>
+            <Text style={styles.sectionTitle}>Next medication</Text>
+            {nextDose ? renderDose({ item: nextDose, featured: true }) : hasCurrentDoseContent && visibleDoses.length > 0 ? <View style={styles.caughtUp}>
+              <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
+              <Text style={styles.emptyText}>No more medications scheduled for today.</Text>
+            </View> : null}
+            <View style={styles.scheduleHeading}>
+              <Text style={styles.sectionTitle}>Today&apos;s schedule</Text>
+              <ThemedButton label="Add medication" tone="outline" size="compact" onPress={() => router.push("/medications")} accessibilityLabel="Add medication" style={styles.quickButton} />
             </View>
-            <View style={styles.quickActions}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Add medication" onPress={() => router.push("/medications")} style={styles.quickButton}><Text style={styles.quickButtonText}>Add medication</Text></Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="View medication history" onPress={() => router.push("/history" as never)} style={styles.quickButton}><Text style={styles.quickButtonText}>View history</Text></Pressable>
+
+            <View style={styles.finalizedFilters}>
+              <ThemedChip label="Taken" selected={finalizedDoseFilter === "taken"} onPress={() => setFinalizedDoseFilter("taken")} accessibilityLabel="Taken doses" style={styles.finalizedFilterChip} textStyle={styles.finalizedFilterLabel} hitSlop={5} />
+              <ThemedChip label="Skipped" selected={finalizedDoseFilter === "skipped"} onPress={() => setFinalizedDoseFilter("skipped")} accessibilityLabel="Skipped doses" style={styles.finalizedFilterChip} textStyle={styles.finalizedFilterLabel} hitSlop={5} />
             </View>
-            <Text style={styles.sectionTitle}>{selectedDate === toLocalDateString() ? "To take" : "Planned doses"}</Text>
 
             {error ? (
               <Pressable
@@ -285,77 +331,34 @@ export default function HomeScreen() {
               </Pressable>
             ) : null}
 
-            {isLoading && doses.length === 0 ? (
-              <ActivityIndicator size="large" style={styles.loader} />
-            ) : null}
           </>
         }
         ListEmptyComponent={
-          !isLoading && pendingDoses.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>{doses.length ? "No doses waiting" : "No doses scheduled for today"}</Text>
-              <Text style={styles.emptyText}>{doses.length ? "Recorded doses are available in their sections below." : "Add your first medication to get started."}</Text>
-              <ThemedButton label="Manage medications" onPress={() => router.push("/medications")} accessibilityLabel="Manage medications" style={styles.emptyButton} />
-            </View>
+          showFirstScopeSkeleton ? <ContentFade key="home-dose-skeleton" duration={motion.duration.skeletonCrossfade}><DoseListSkeleton /></ContentFade> : hasCurrentDoseContent ? (
+            <ContentFade key={`finalized-empty-${finalizedDoseFilter}`} duration={motion.duration.fast}>
+              <Text style={styles.finalizedEmptyText}>{finalizedDoseFilter === "taken" ? "No taken doses yet." : "No skipped doses."}</Text>
+            </ContentFade>
           ) : null
         }
-        ListFooterComponent={<View style={styles.completedSection}>
-          <FinalizedSection label="Taken today" doses={takenDoses} expanded={showTaken} onToggle={() => setShowTaken((value) => !value)} renderDose={renderDose} />
-          <FinalizedSection label="Skipped today" doses={skippedDoses} expanded={showSkipped} onToggle={() => setShowSkipped((value) => !value)} renderDose={renderDose} />
-          <FinalizedSection label="Missed today" doses={missedDoses} expanded={showMissed} onToggle={() => setShowMissed((value) => !value)} renderDose={renderDose} />
-        </View>}
       />
       <DoseStatusOverflowSheet dose={statusMenuDose} anchor={statusMenuAnchor} onClose={() => { setStatusMenuDose(null); setStatusMenuAnchor(null); }} onCorrect={(target) => statusMenuDose && confirmStatusCorrection(statusMenuDose, target)} />
-    </View>
+    </View></TabContentTransition>
   );
 }
 
-function FinalizedSection({ label, doses, expanded, onToggle, renderDose }: { label: string; doses: TodayDose[]; expanded: boolean; onToggle: () => void; renderDose: ({ item }: { item: TodayDose }) => ReactElement }) {
-  const { colors } = useAppTheme();
-  const styles = createStyles(colors);
-  if (!doses.length) return null;
-  return <View style={styles.finalizedGroup}><Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${label}`} accessibilityState={{ expanded }} onPress={onToggle} style={styles.completedToggle}><Text style={styles.sectionTitle}>{label} ({doses.length})</Text><Text style={styles.todayLink}>{expanded ? "Hide" : "Show"}</Text></Pressable>{expanded ? doses.map((dose) => <View key={dose.id}>{renderDose({ item: dose })}</View>) : null}</View>;
-}
-
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  listContent: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 110 },
-  header: { gap: 8 },
-  greeting: { marginTop: 10, fontSize: 21, lineHeight: 27, fontWeight: "700", color: colors.textPrimary },
-  homeDate: { fontSize: 17, fontWeight: "700", color: colors.textSecondary },
-  offlineHint: { fontSize: 14, lineHeight: 20, color: colors.textMuted },
-  dateControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 24,
-    marginBottom: 20,
-    gap: 8,
-  },
-  dateCenter: { flex: 1, minWidth: 0, alignItems: "center" },
-  dateLabel: { fontSize: 17, fontWeight: "700", textAlign: "center", color: colors.textPrimary },
-  todayLink: { marginTop: 4, color: colors.outlineForeground, fontSize: 14, fontWeight: "600" },
-  dateButton: {
-    minHeight: ui.touch.minimum,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: colors.secondaryBackground,
-  },
-  dateButtonText: { fontWeight: "700", color: colors.secondaryForeground },
-  progressCard: { padding: ui.spacing.card, marginBottom: 18, borderRadius: ui.radius.card, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.secondaryBackground },
-  progressTitle: { fontSize: 17, fontWeight: "700", color: colors.secondaryForeground },
-  progressText: { marginTop: 5, fontSize: 16, color: colors.secondaryForeground },
-  nextText: { marginTop: 8, fontSize: 15, fontWeight: "600", color: colors.secondaryForeground },
-  summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
-  summaryText: { color: colors.secondaryForeground, fontSize: 14, fontWeight: "600" },
-  quickActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
-  quickButton: { flexGrow: 1, minHeight: ui.touch.minimum, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, backgroundColor: colors.inputBackground },
-  quickButtonText: { color: colors.outlineForeground, fontWeight: "700" },
+  container: { flex: 1 },
+  listContent: { padding: ui.spacing.screen, paddingTop: 10, paddingBottom: 120 },
+  progressCard: { paddingHorizontal: ui.spacing.card, paddingVertical: ui.spacing.md, marginBottom: ui.spacing.section, borderRadius: ui.radius.medium, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSubtle },
+  progressPlaceholder: { minHeight: 84, marginBottom: ui.spacing.section },
+  progressTitle: { fontSize: 15, fontWeight: "800", color: colors.textPrimary },
+  progressText: { marginTop: 3, fontSize: 14, color: colors.textSecondary },
+  summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 9 },
+  summaryText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
+  quickButton: { flexGrow: 0 },
+  scheduleHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md, marginBottom: ui.spacing.xs },
+  caughtUp: { paddingVertical: ui.spacing.md },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  completedSection: { marginTop: 20 },
-  finalizedGroup: { marginBottom: 8 },
-  completedToggle: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   errorBox: {
     marginBottom: 16,
     padding: 14,
@@ -365,14 +368,20 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   errorText: { fontSize: 15, fontWeight: "600", color: colors.dangerForeground },
   errorHint: { marginTop: 4, fontSize: 13, color: colors.textMuted },
   loader: { marginVertical: 32 },
-  doseCard: {
-    marginBottom: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    backgroundColor: colors.cardBackground,
-  },
+  doseCard: { marginBottom: 0, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  featuredDose: { marginBottom: ui.spacing.section, padding: ui.spacing.card, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.borderStrong, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
+  finalizedDoseCard: { marginBottom: 0, padding: 14, borderWidth: 1, borderBottomWidth: 1, borderColor: colors.border, borderRadius: 15, backgroundColor: colors.cardBackground },
+  finalizedFilters: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  finalizedFilterChip: { minHeight: 34, paddingHorizontal: 16, borderRadius: 999 },
+  finalizedFilterLabel: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  finalizedDoseItem: { marginBottom: 8 },
+  finalizedEmptyText: { paddingVertical: 8, color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  finalizedStatusBadge: { minHeight: 28, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 11, paddingVertical: 4, borderWidth: 1, borderRadius: 999 },
+  takenStatusBadge: { borderColor: colors.border, backgroundColor: colors.successSurface },
+  skippedStatusBadge: { borderColor: colors.border, backgroundColor: colors.warningSurface },
+  finalizedStatusBadgeText: { fontSize: 12, lineHeight: 16, fontWeight: "700" },
+  takenStatusBadgeText: { color: colors.success },
+  skippedStatusBadgeText: { color: colors.warning },
   cardTopRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -385,10 +394,17 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   overflowText: { fontSize: 24, lineHeight: 28, color: colors.textPrimary },
   time: { fontSize: 19, fontWeight: "700", color: colors.cardForeground },
   medicationName: { marginTop: 14, fontSize: 19, fontWeight: "700", color: colors.cardForeground },
+  finalizedMedicationName: { marginTop: 8 },
   dosage: { marginTop: 3, fontSize: 16, color: colors.textSecondary },
   statusDescription: { marginTop: 14, fontSize: 15, fontWeight: "600", color: colors.textSecondary },
-  actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 16 },
-  flexAction: { flex: 1 },
+  actionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md },
+  doseAction: { minHeight: 44, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderRadius: 11 },
+  takenAction: { flex: 1, backgroundColor: colors.primaryBackground, borderColor: colors.primaryBackground },
+  takenActionLabel: { flexShrink: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.primaryForeground },
+  skipAction: { flex: 1, backgroundColor: colors.surfaceSubtle, borderColor: colors.outlineBorder },
+  skipActionLabel: { flexShrink: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.outlineForeground },
+  doseActionPressed: { opacity: 0.82 },
+  doseActionDisabled: { opacity: 0.5 },
   emptyContainer: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 20 },
   emptyTitle: { fontSize: 19, fontWeight: "700", color: colors.textPrimary },
   emptyText: {

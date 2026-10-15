@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View, ViewToken } from "react-native";
+import { Alert, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View, ViewToken } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { ScreenHeader } from "@/components/screen-header";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
@@ -11,6 +11,10 @@ import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
 import { StatusBadge, ThemedButton, ThemedChip } from "@/components/themed-ui";
 import { useProfileStore } from "@/state/profile.store";
 import { useMedicationStore } from "@/state/medication.store";
+import { ContentFade, MedicationListSkeleton } from "@/components/loading-primitives";
+import { TabContentTransition } from "@/components/tab-content-transition";
+import { motion } from "@/components/motion-tokens";
+import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { formatStockQuantity, getRefillStockState } from "@/features/refills/refill.domain";
 import { MedicationOverflowSheet } from "@/features/medications/medication-overflow-sheet";
 import { AnchoredMenuAnchor } from "@/components/anchored-action-menu.domain";
@@ -52,7 +56,11 @@ export default function MedicationsScreen() {
   const store = useMedications();
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
   const medicationProfileId = useMedicationStore((state) => state.profileId);
+  const loadedProfileId = useMedicationStore((state) => state.loadedProfileId);
+  const loadedFilter = useMedicationStore((state) => state.loadedFilter);
+  const hasAnyMedications = useMedicationStore((state) => state.hasAnyMedications);
   const medicationListRef = useRef<FlatList<Medication>>(null);
+  const dosageInputRef = useRef<TextInput>(null);
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingJumpFrameRef = useRef<number | null>(null);
   const pendingJumpScopeRef = useRef<{ filter: Filter; profileId: string | null } | null>(null);
@@ -71,8 +79,19 @@ export default function MedicationsScreen() {
   const [searchDropdownTop, setSearchDropdownTop] = useState<number | null>(null);
   const [activeAlphabetBucket, setActiveAlphabetBucket] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false); const [notice, setNotice] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [dosageError, setDosageError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isNameFocused, setIsNameFocused] = useState(false);
+  const [isDosageFocused, setIsDosageFocused] = useState(false);
+  const submissionInFlightRef = useRef(false);
   const [overflowMedication, setOverflowMedication] = useState<Medication | null>(null);
   const [overflowAnchor, setOverflowAnchor] = useState<AnchoredMenuAnchor | null>(null);
+  const hasCurrentMedicationData = medicationProfileId === selectedProfileId && loadedProfileId === selectedProfileId && loadedFilter === filter;
+  const delayedLoadingVisible = useDelayedLoading(store.isLoading && !hasCurrentMedicationData);
+  const showFirstScopeSkeleton = !store.error && !hasCurrentMedicationData && delayedLoadingVisible;
+  const hasCurrentMedicationContent = hasCurrentMedicationData;
+  const scopedMedications = hasCurrentMedicationContent ? store.medications : [];
   const currentSearchQueryRef = useRef(searchQuery);
   const currentTargetIdRef = useRef(pendingScrollMedicationId);
   currentSearchQueryRef.current = searchQuery;
@@ -103,7 +122,7 @@ export default function MedicationsScreen() {
   useEffect(() => { setIsAlphabetRailCardAreaVisible(false); cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); }, [cancelPendingMedicationJump, clearActiveScrollRequest, clearJumpHighlight, filter, selectedProfileId]);
   const changed = useMemo(() => Boolean(editing && hasMedicationChanges(editing as Medication, { name, dosage })), [name, dosage, editing]);
   const normalizedSearchQuery = useMemo(() => normalizeMedicationSearchQuery(searchQuery), [searchQuery]);
-  const lifecycleMedications = useMemo(() => filterMedicationsByLifecycle(store.medications, filter), [store.medications, filter]);
+  const lifecycleMedications = useMemo(() => filterMedicationsByLifecycle(scopedMedications, filter), [scopedMedications, filter]);
   const visibleMedications = useMemo(() => sortMedicationsAlphabetically(filterMedicationsBySearch(lifecycleMedications, searchQuery)), [lifecycleMedications, searchQuery]);
   visibleMedicationsRef.current = visibleMedications;
   const suggestions = useMemo(() => getMedicationSearchSuggestions(lifecycleMedications, searchQuery), [lifecycleMedications, searchQuery]);
@@ -195,9 +214,48 @@ export default function MedicationsScreen() {
       if (pendingJumpFrameRef.current === frame) pendingJumpFrameRef.current = null;
     };
   }, [cancelPendingMedicationJump, filter, medicationProfileId, normalizedSearchQuery, pendingScrollMedicationId, searchQuery, selectedProfileId, visibleMedications]);
-  const cancelEdit = () => { setEditing(null); setName(""); setDosage(""); };
-  const beginEdit = (m: Medication) => { setEditing({ id: m.id, name: m.name, dosage: m.dosage }); setName(m.name); setDosage(m.dosage); setNotice(null); };
-  async function save() { setIsSaving(true); try { if (editing) { await store.updateMedication(editing.id, { name, dosage }); setNotice("Medication updated."); } else { await store.createMedication({ name, dosage }); setNotice("Medication added."); } cancelEdit(); } catch {} finally { setIsSaving(false); } }
+  const cancelEdit = () => { setEditing(null); setName(""); setDosage(""); setNameError(null); setDosageError(null); setSubmitError(null); };
+  const updateName = (value: string) => { setName(value); setNameError(null); setSubmitError(null); };
+  const updateDosage = (value: string) => { setDosage(value); setDosageError(null); setSubmitError(null); };
+  const beginEdit = (m: Medication) => { setEditing({ id: m.id, name: m.name, dosage: m.dosage }); setName(m.name); setDosage(m.dosage); setNameError(null); setDosageError(null); setSubmitError(null); setNotice(null); };
+  function validateForm() {
+    const cleanName = name.trim();
+    const cleanDosage = dosage.trim();
+    const nextNameError = !cleanName ? "Enter a medication name." : cleanName.length > 100 ? "Use 100 characters or fewer." : null;
+    const nextDosageError = !cleanDosage ? "Enter a dosage." : cleanDosage.length > 100 ? "Use 100 characters or fewer." : null;
+    setNameError(nextNameError);
+    setDosageError(nextDosageError);
+    return !nextNameError && !nextDosageError;
+  }
+  async function save() {
+    if (submissionInFlightRef.current || !validateForm()) return;
+    if (!editing && (!selectedProfileId || medicationProfileId !== selectedProfileId)) {
+      setSubmitError("Choose an active profile before adding medication.");
+      return;
+    }
+    submissionInFlightRef.current = true;
+    setIsSaving(true);
+    setSubmitError(null);
+    store.clearError();
+    try {
+      if (editing) {
+        await store.updateMedication(editing.id, { name: name.trim(), dosage: dosage.trim() });
+        setNotice("Medication updated.");
+        cancelEdit();
+      } else {
+        await store.createMedication({ name: name.trim(), dosage: dosage.trim() });
+        setFilter("active");
+        cancelEdit();
+        setNotice("Medication added.");
+        await store.loadMedications("active");
+      }
+    } catch {
+      setSubmitError(useMedicationStore.getState().error ?? "Could not save this medication. Please try again.");
+    } finally {
+      submissionInFlightRef.current = false;
+      setIsSaving(false);
+    }
+  }
   function requestSave() { if (editing && !changed) return; if (!editing) { void save(); return; } Alert.alert("Save medication changes?", `You are updating:\n\n${editing.name}`, [{ text: "Cancel", style: "cancel" }, { text: "Update", onPress: () => void save() }]); }
   function requestArchive(m: Medication) { Alert.alert("Archive medication?", `${m.name} will move to Archived. Existing dose history will be kept.`, [{ text: "Cancel", style: "cancel" }, { text: "Archive", onPress: () => void store.archiveMedication(m.id).then(() => setNotice("Medication archived.")).catch(() => undefined) }]); }
   function requestDelete(m: Medication) { Alert.alert("Delete medication?", `“${m.name}” will be removed from your medication list. Future schedules and reminders for this medication will be cancelled. Existing finalized intake history will be preserved.`, [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => void store.deleteMedication(m.id).then(() => setNotice("Medication deleted.")).catch(() => undefined) }]); }
@@ -209,51 +267,89 @@ export default function MedicationsScreen() {
   const submitMedicationSearch = () => { const request = medicationProfileId === selectedProfileId ? getMedicationSearchSubmitJumpRequest(lifecycleMedications, searchQuery) : null; if (request) jumpToMedication(request.medicationId); else Keyboard.dismiss(); };
   const jumpToAlphabetBucket = (bucket: string) => { const index = visibleMedications.findIndex((medication) => getMedicationAlphabetBucket(medication.name) === bucket); if (index >= 0) { setActiveAlphabetBucket(bucket); clearActiveScrollRequest(); medicationListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.08 }); } };
   const empty = filter === "active" ? "No active medications." : filter === "paused" ? "No paused medications." : "No archived medications.";
-  const hasSearchResults = visibleMedications.length > 0;
-  return <View style={styles.container} onLayout={(event) => setListViewportHeight(event.nativeEvent.layout.height)}><MedicationOverflowSheet medication={overflowMedication} anchor={overflowAnchor} onClose={closeOverflow} onArchive={() => { const medication = overflowMedication; closeOverflow(); if (medication) requestArchive(medication); }} onDelete={() => { const medication = overflowMedication; closeOverflow(); if (medication) requestDelete(medication); }} /><FlatList ref={medicationListRef} data={visibleMedications} keyExtractor={(x) => x.id} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" scrollEventThrottle={16} viewabilityConfig={alphabetViewabilityConfig} onViewableItemsChanged={onAlphabetViewableItemsChanged} onScrollBeginDrag={clearActiveScrollRequest} onScroll={(event) => { const offset = event.nativeEvent.contentOffset.y; const cardAreaStart = Math.max(0, sectionHeadingBottom - ALPHABET_RAIL_CARD_VIEWPORT_TOP); const next = sectionHeadingBottom > 0 && offset >= cardAreaStart; setIsAlphabetRailCardAreaVisible((current) => current === next ? current : next); }} onMomentumScrollEnd={clearActiveScrollRequest} onScrollToIndexFailed={(info) => { const request = activeScrollRequestRef.current; if (!request || request.filter !== filter || request.profileId !== selectedProfileId) return; const plan = getMedicationSearchJumpScrollPlan(visibleMedicationsRef.current, request.medicationId); if (!plan) { clearActiveScrollRequest(); return; } if (plan.strategy === "end") { medicationListRef.current?.scrollToEnd({ animated: true }); } else { medicationListRef.current?.scrollToOffset({ offset: Math.max(0, listHeaderHeight + info.averageItemLength * Math.max(0, plan.index - 1)), animated: true }); } showJumpHighlight(plan.medicationId); }} renderItem={({ item }) => <View style={reserveCardRailSpace ? styles.cardAreaWithAlphabetRail : undefined}><Card medication={item} highlighted={isMedicationSearchJumpHighlighted(item.id, highlightedMedicationId)} onEdit={beginEdit} onMore={more} onRestore={(id) => void store.restoreMedication(id).then(() => setNotice("Medication restored.")).catch(() => undefined)} /></View>} ListHeaderComponent={<View style={styles.listHeaderOverlayHost} onLayout={(event) => setListHeaderHeight(event.nativeEvent.layout.height)}>
+  return <TabContentTransition style={styles.container}><ScreenHeader title="Manage Medications" /><View style={styles.container} onLayout={(event) => setListViewportHeight(event.nativeEvent.layout.height)}><MedicationOverflowSheet medication={overflowMedication} anchor={overflowAnchor} onClose={closeOverflow} onArchive={() => { const medication = overflowMedication; closeOverflow(); if (medication) requestArchive(medication); }} onDelete={() => { const medication = overflowMedication; closeOverflow(); if (medication) requestDelete(medication); }} /><FlatList ref={medicationListRef} data={visibleMedications} keyExtractor={(x) => x.id} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets scrollEventThrottle={16} viewabilityConfig={alphabetViewabilityConfig} onViewableItemsChanged={onAlphabetViewableItemsChanged} onScrollBeginDrag={clearActiveScrollRequest} onScroll={(event) => { const offset = event.nativeEvent.contentOffset.y; const cardAreaStart = Math.max(0, sectionHeadingBottom - ALPHABET_RAIL_CARD_VIEWPORT_TOP); const next = sectionHeadingBottom > 0 && offset >= cardAreaStart; setIsAlphabetRailCardAreaVisible((current) => current === next ? current : next); }} onMomentumScrollEnd={clearActiveScrollRequest} onScrollToIndexFailed={(info) => { const request = activeScrollRequestRef.current; if (!request || request.filter !== filter || request.profileId !== selectedProfileId) return; const plan = getMedicationSearchJumpScrollPlan(visibleMedicationsRef.current, request.medicationId); if (!plan) { clearActiveScrollRequest(); return; } if (plan.strategy === "end") { medicationListRef.current?.scrollToEnd({ animated: true }); } else { medicationListRef.current?.scrollToOffset({ offset: Math.max(0, listHeaderHeight + info.averageItemLength * Math.max(0, plan.index - 1)), animated: true }); } showJumpHighlight(plan.medicationId); }} renderItem={({ item }) => <View style={reserveCardRailSpace ? styles.cardAreaWithAlphabetRail : undefined}><Card medication={item} highlighted={isMedicationSearchJumpHighlighted(item.id, highlightedMedicationId)} onEdit={beginEdit} onMore={more} onRestore={(id) => void store.restoreMedication(id).then(() => setNotice("Medication restored.")).catch(() => undefined)} /></View>} ListHeaderComponent={<View style={styles.listHeaderOverlayHost} onLayout={(event) => setListHeaderHeight(event.nativeEvent.layout.height)}>
     <View style={styles.listHeaderContent}>
-      <ScreenHeader title="Medications" />
-      <Text style={styles.intro}>Add and manage your medications</Text>
+      <Text accessibilityRole="header" style={styles.searchHeading}>Find medicines quickly</Text>
       <View style={styles.searchAnchor} onLayout={(event) => setSearchDropdownTop(event.nativeEvent.layout.y + event.nativeEvent.layout.height + 6)}>
         <View style={styles.searchContainer}><TextInput accessibilityLabel="Search medications" accessibilityHint="Type a medication name to filter. Use Search to jump to the first suggestion." placeholder="Search medications" placeholderTextColor={colors.muted} value={searchQuery} onChangeText={updateSearchQuery} onFocus={() => setIsSuggestionSelectionComplete(false)} style={styles.searchInput} returnKeyType="search" blurOnSubmit onSubmitEditing={submitMedicationSearch} autoCorrect={false} autoCapitalize="none" />{normalizedSearchQuery ? <Pressable onPress={clearSearch} style={styles.clearSearchButton} accessibilityRole="button" accessibilityLabel="Clear medication search"><Text style={styles.clearSearchText}>Clear</Text></Pressable> : null}</View>
       </View>
       {showSuggestions && searchDropdownTop !== null ? <View style={[styles.suggestions, { top: searchDropdownTop }]} accessible={false}>{suggestions.map((medication) => <Pressable key={medication.id} style={styles.suggestionRow} onPress={() => jumpToMedication(medication.id)} accessibilityRole="button" accessibilityLabel={getMedicationSearchSuggestionAccessibilityLabel(medication)} accessibilityHint="Clears the search and scrolls to this medication card."><Text numberOfLines={1} style={styles.suggestionName}>{medication.name}</Text><Text numberOfLines={1} style={styles.suggestionDosage}>{medication.dosage}</Text></Pressable>)}</View> : null}
-      <View style={styles.filters}>{(["active", "paused", "archived"] as const).map((v) => <ThemedChip key={v} label={v[0].toUpperCase() + v.slice(1)} selected={filter === v} onPress={() => setFilter(v)} accessibilityLabel={`${v} medications${filter === v ? ", selected" : ""}`} />)}</View>
+      <View style={styles.filters}>{(["active", "paused", "archived"] as const).map((v) => <ThemedChip key={v} label={v[0].toUpperCase() + v.slice(1)} selected={filter === v} onPress={() => setFilter(v)} accessibilityLabel={`${v} medications${filter === v ? ", selected" : ""}`} style={styles.filterChip} hitSlop={6} />)}</View>
       {store.error ? <Pressable onPress={store.clearError} style={styles.error} accessibilityRole="button" accessibilityLabel={`${store.error}. Tap to dismiss.`}><Text accessibilityRole="alert" style={styles.messageText}>{store.error}</Text><Text>Tap to dismiss</Text></Pressable> : null}<AutoDismissNotice message={notice} onDismiss={() => setNotice(null)} />
-      <View style={styles.form}><Text style={styles.formTitle}>{editing ? "Edit Medication" : "Add medication"}</Text>{editing ? <Text style={styles.editing}>Editing: {editing.name}</Text> : null}<TextInput accessibilityLabel="Medication name" placeholder="Medication name" placeholderTextColor={colors.muted} value={name} onChangeText={setName} style={styles.input} /><TextInput accessibilityLabel="Dosage" placeholder="Dosage, for example 500 mg" placeholderTextColor={colors.muted} value={dosage} onChangeText={setDosage} style={styles.input} />{editing && !changed ? <Text style={styles.noChanges}>No changes to save.</Text> : null}<View style={styles.formActions}>{editing ? <Button label="Cancel" onPress={cancelEdit} disabled={isSaving} secondary accessibilityLabel="Cancel editing" /> : null}<Button label={isSaving ? "Saving..." : editing ? "Update Medication" : "Add Medication"} onPress={requestSave} disabled={isSaving || Boolean(editing && !changed)} accessibilityLabel={editing ? "Update medication" : "Add medication"} /></View></View>
-      <Text style={styles.heading} onLayout={(event) => setSectionHeadingBottom(event.nativeEvent.layout.y + event.nativeEvent.layout.height)}>{filter[0].toUpperCase() + filter.slice(1)} medications</Text>{store.isLoading && !store.medications.length ? <ActivityIndicator size="large" style={styles.loader} /> : null}
+      <View style={styles.form}>
+        <Text accessibilityRole="header" style={styles.formTitle}>{editing ? "Edit Medication" : "Add medication"}</Text>
+        {editing ? <Text style={styles.editing}>Editing: {editing.name}</Text> : null}
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Medication name</Text>
+          <TextInput accessibilityLabel="Medication name" accessibilityHint={nameError ?? undefined} placeholder="Medication name" placeholderTextColor={colors.muted} value={name} onChangeText={updateName} onFocus={() => setIsNameFocused(true)} onBlur={() => setIsNameFocused(false)} returnKeyType="next" blurOnSubmit={false} onSubmitEditing={() => dosageInputRef.current?.focus()} style={[styles.input, isNameFocused && styles.inputFocused, nameError && styles.inputInvalid]} />
+          {nameError ? <Text accessibilityRole="alert" style={styles.fieldError}>{nameError}</Text> : null}
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Dosage</Text>
+          <TextInput ref={dosageInputRef} accessibilityLabel="Dosage" accessibilityHint={dosageError ?? undefined} placeholder="Dosage" placeholderTextColor={colors.muted} value={dosage} onChangeText={updateDosage} onFocus={() => setIsDosageFocused(true)} onBlur={() => setIsDosageFocused(false)} returnKeyType="done" onSubmitEditing={requestSave} style={[styles.input, isDosageFocused && styles.inputFocused, dosageError && styles.inputInvalid]} />
+          {dosageError ? <Text accessibilityRole="alert" style={styles.fieldError}>{dosageError}</Text> : null}
+        </View>
+        {editing && !changed ? <Text style={styles.noChanges}>No changes to save.</Text> : null}
+        {submitError ? <Text accessibilityRole="alert" style={styles.submitError}>{submitError}</Text> : null}
+        <View style={styles.formActions}>
+          {editing ? <Button label="Cancel" onPress={cancelEdit} disabled={isSaving} secondary accessibilityLabel="Cancel editing" /> : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={editing ? "Update medication" : "Add medication"}
+            accessibilityHint="Saves this medication."
+            accessibilityState={{ disabled: isSaving || Boolean(editing && !changed), busy: isSaving }}
+            disabled={isSaving || Boolean(editing && !changed)}
+            onPress={requestSave}
+            hitSlop={5}
+            style={({ pressed }) => [styles.addMedicationButton, pressed && !isSaving && styles.addMedicationButtonPressed]}
+          >
+            <Text style={styles.addMedicationButtonText}>{isSaving ? editing ? "Saving..." : "Adding..." : editing ? "Update Medication" : "Add Medication"}</Text>
+          </Pressable>
+        </View>
+      </View>
+      <Text style={styles.heading} onLayout={(event) => setSectionHeadingBottom(event.nativeEvent.layout.y + event.nativeEvent.layout.height)}>{filter[0].toUpperCase() + filter.slice(1)} medications</Text>
     </View>
-  </View>} ListEmptyComponent={!store.isLoading ? <View style={styles.empty}><Text style={styles.emptyTitle}>{normalizedSearchQuery ? `No medications match “${searchQuery.trim()}”.` : empty}</Text><Text style={styles.emptyText}>{normalizedSearchQuery ? "Try another name or clear the search." : filter === "active" ? "Add your first medication above." : "Choose another medication group to review it."}</Text>{normalizedSearchQuery && !hasSearchResults ? <Pressable style={styles.clearEmptySearchButton} onPress={clearSearch} accessibilityRole="button" accessibilityLabel="Clear medication search"><Text style={styles.clearEmptySearchText}>Clear search</Text></Pressable> : null}</View> : null} />{showAlphabetRail ? <AlphabetRail buckets={availableAlphabetBuckets} activeBucket={activeAlphabetBucket} geometry={{ top: alphabetRailGeometry.top, height: alphabetRailGeometry.height }} onJump={jumpToAlphabetBucket} /> : null}</View>;
+  </View>} ListEmptyComponent={showFirstScopeSkeleton ? <ContentFade key="medication-skeleton" duration={motion.duration.skeletonCrossfade}><MedicationListSkeleton /></ContentFade> : hasCurrentMedicationContent ? <ContentFade key="medication-empty" duration={motion.duration.skeletonCrossfade}><View style={styles.empty}><Text style={styles.emptyTitle}>{normalizedSearchQuery || filter !== "active" ? "No matching medications" : hasAnyMedications ? empty : "No medications yet"}</Text><Text style={styles.emptyText}>{normalizedSearchQuery ? "Try a different search." : filter !== "active" ? "Choose another medication group to review it." : hasAnyMedications ? "Choose another medication group to review it." : "Add your first medication above."}</Text>{normalizedSearchQuery ? <Pressable style={styles.clearEmptySearchButton} onPress={clearSearch} accessibilityRole="button" accessibilityLabel="Clear medication search"><Text style={styles.clearEmptySearchText}>Clear search</Text></Pressable> : null}</View></ContentFade> : null} />{showAlphabetRail ? <AlphabetRail buckets={availableAlphabetBuckets} activeBucket={activeAlphabetBucket} geometry={{ top: alphabetRailGeometry.top, height: alphabetRailGeometry.height }} onJump={jumpToAlphabetBucket} /> : null}</View></TabContentTransition>;
 }
 
-function Button({ label, onPress, disabled, secondary, accessibilityLabel }: { label: string; onPress: () => void; disabled?: boolean; secondary?: boolean; accessibilityLabel: string }) { return <ThemedButton label={label} onPress={onPress} disabled={disabled} tone={secondary ? "outline" : "primary"} accessibilityLabel={accessibilityLabel} style={secondary ? undefined : { flexGrow: 1 }} />; }
+function Button({ label, onPress, disabled, secondary, compact = false, accessibilityLabel, loading, loadingLabel }: { label: string; onPress: () => void; disabled?: boolean; secondary?: boolean; compact?: boolean; accessibilityLabel: string; loading?: boolean; loadingLabel?: string }) { const { colors } = useAppTheme(); return <ThemedButton label={label} onPress={onPress} disabled={disabled} loading={loading} loadingLabel={loadingLabel} tone={secondary ? "outline" : "primary"} size={compact ? "compact" : "regular"} accessibilityLabel={accessibilityLabel} hitSlop={compact ? 5 : undefined} textStyle={secondary ? compact ? { fontSize: 14, fontWeight: "600" } : undefined : { fontSize: 15, fontWeight: "600" }} style={compact ? { minHeight: 38, borderRadius: 10, paddingHorizontal: 10, backgroundColor: colors.secondaryBackground, borderColor: colors.outlineBorder } : secondary ? undefined : { width: "100%", minHeight: 48, borderRadius: 13 }} />; }
 function AlphabetRail({ buckets, activeBucket, geometry, onJump }: { buckets: string[]; activeBucket: string | null; geometry: { top: number; height: number }; onJump: (bucket: string) => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); return <View style={[styles.alphabetRail, geometry]} accessible={false}><View pointerEvents="none" style={styles.alphabetRailDivider} />{buckets.map((bucket) => { const selected = activeBucket === bucket; return <Pressable key={bucket} style={({ pressed }) => [styles.alphabetRailButton, pressed && styles.alphabetRailButtonPressed]} onPress={() => onJump(bucket)} accessibilityRole="button" accessibilityLabel={getMedicationAlphabetBucketAccessibilityLabel(bucket)} accessibilityState={{ selected }} hitSlop={{ left: 6, right: 6 }}><View style={[styles.alphabetRailPill, selected && styles.alphabetRailPillSelected]}><Text style={[styles.alphabetRailText, selected && styles.alphabetRailTextSelected]}>{bucket}</Text></View></Pressable>; })}</View>; }
-function Card({ medication, highlighted, onEdit, onMore, onRestore }: { medication: Medication; highlighted: boolean; onEdit: (m: Medication) => void; onMore: (m: Medication, anchor: View | null) => void; onRestore: (id: string) => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); const overflowAnchorRef = useRef<View>(null); const status = medication.archivedAt ? "Archived" : medication.isActive ? "Active" : "Paused"; const tone = medication.archivedAt ? "expired" : medication.isActive ? "active" : "paused"; const inventory = medication.refillInventory; const stockState = inventory ? getRefillStockState(inventory) : "disabled"; return <View style={[styles.card, highlighted && styles.highlightedCard]}><View style={styles.cardTopRow}><View style={styles.cardTitle}><Text style={styles.name}>{medication.name}</Text><Text style={styles.dosage}>{medication.dosage}</Text></View><View ref={overflowAnchorRef} collapsable={false}><Pressable style={styles.overflowButton} onPress={() => onMore(medication, overflowAnchorRef.current)} accessibilityRole="button" accessibilityLabel={`More actions for ${medication.name}`} hitSlop={8}><Text style={styles.overflowIcon}>⋮</Text></Pressable></View></View><StatusBadge label={status} tone={tone} style={styles.status} />{inventory?.trackingEnabled ? <Text style={[styles.stock, stockState === "low" && { color: colors.warning }]}>{stockState === "low" ? "Refill soon: " : "Stock: "}{formatStockQuantity(inventory.currentQuantity, inventory.unit)}</Text> : null}<View style={styles.actions}>{medication.archivedAt ? <Button label="Restore" onPress={() => onRestore(medication.id)} accessibilityLabel={`Restore ${medication.name}`} secondary /> : <><Button label="Schedule" onPress={() => router.push({ pathname: "/schedule", params: { medicationId: medication.id, medicationName: medication.name, profileId: medication.profileId } })} accessibilityLabel={`Manage schedule for ${medication.name}`} secondary /><Button label="Edit" onPress={() => onEdit(medication)} accessibilityLabel={`Edit ${medication.name}`} secondary /><Button label="Refill" onPress={() => router.push({ pathname: "/refill-settings" as never, params: { medicationId: medication.id, profileId: medication.profileId } })} accessibilityLabel={`Manage refill tracking for ${medication.name}`} secondary /></>}</View></View>; }
+function Card({ medication, highlighted, onEdit, onMore, onRestore }: { medication: Medication; highlighted: boolean; onEdit: (m: Medication) => void; onMore: (m: Medication, anchor: View | null) => void; onRestore: (id: string) => void }) { const { colors } = useAppTheme(); const styles = createStyles(colors); const overflowAnchorRef = useRef<View>(null); const status = medication.archivedAt ? "Archived" : medication.isActive ? "Active" : "Paused"; const tone = medication.archivedAt ? "expired" : medication.isActive ? "active" : "paused"; const inventory = medication.refillInventory; const stockState = inventory ? getRefillStockState(inventory) : "disabled"; return <View style={[styles.card, highlighted && styles.highlightedCard]}><View style={styles.cardTopRow}><View style={styles.cardTitle}><Text style={styles.name}>{medication.name}</Text><Text style={styles.dosage}>{medication.dosage}</Text></View><View ref={overflowAnchorRef} collapsable={false}><Pressable style={styles.overflowButton} onPress={() => onMore(medication, overflowAnchorRef.current)} accessibilityRole="button" accessibilityLabel={`More actions for ${medication.name}`} hitSlop={8}><Text style={styles.overflowIcon}>⋮</Text></Pressable></View></View><StatusBadge label={status} tone={tone} style={styles.status} textStyle={{ flexShrink: 0 }} />{inventory?.trackingEnabled ? <Text style={[styles.stock, stockState === "low" && { color: colors.warning }]}>{stockState === "low" ? "Refill soon: " : "Stock: "}{formatStockQuantity(inventory.currentQuantity, inventory.unit)}</Text> : null}<View style={styles.actions}>{medication.archivedAt ? <Button label="Restore" onPress={() => onRestore(medication.id)} accessibilityLabel={`Restore ${medication.name}`} secondary compact /> : <><Pressable style={({ pressed }) => [styles.cardActionButton, pressed && styles.cardActionButtonPressed]} onPress={() => router.push({ pathname: "/schedule", params: { medicationId: medication.id, medicationName: medication.name, profileId: medication.profileId } })} accessibilityRole="button" accessibilityLabel={`Manage schedule for ${medication.name}`} hitSlop={5}><Text style={styles.cardActionButtonText}>Schedule</Text></Pressable><Pressable style={({ pressed }) => [styles.cardActionButton, pressed && styles.cardActionButtonPressed]} onPress={() => onEdit(medication)} accessibilityRole="button" accessibilityLabel={`Edit ${medication.name}`} hitSlop={5}><Text style={styles.cardActionButtonText}>Edit</Text></Pressable><Pressable style={({ pressed }) => [styles.cardActionButton, pressed && styles.cardActionButtonPressed]} onPress={() => router.push({ pathname: "/refill-settings" as never, params: { medicationId: medication.id, profileId: medication.profileId } })} accessibilityRole="button" accessibilityLabel={`Manage refill tracking for ${medication.name}`} hitSlop={5}><Text style={styles.cardActionButtonText}>Refill</Text></Pressable></>}</View></View>; }
 
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  list: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 96 },
+  container: { flex: 1 },
+  list: { padding: ui.spacing.screen, paddingTop: 5, paddingBottom: 124 },
   cardAreaWithAlphabetRail: { marginRight: 26 },
   listHeaderOverlayHost: { position: "relative", zIndex: 2, elevation: 2, overflow: "visible" },
   listHeaderContent: { position: "relative" },
-  intro: { marginTop: 18, fontSize: 16, lineHeight: 22, color: colors.textSecondary },
-  searchAnchor: { position: "relative", marginTop: 16, zIndex: 3, elevation: 3 },
-  searchContainer: { minHeight: 52, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, backgroundColor: colors.inputBackground },
-  searchInput: { flex: 1, minWidth: 0, minHeight: 50, paddingHorizontal: 14, fontSize: 16, color: colors.inputForeground },
+  searchHeading: { marginBottom: 2, fontSize: 15, lineHeight: 18, fontWeight: "600", color: colors.textPrimary },
+  searchAnchor: { position: "relative", marginTop: 0, zIndex: 3, elevation: 3 },
+  searchContainer: { minHeight: 46, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 12, backgroundColor: colors.surface },
+  searchInput: { flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 14, fontSize: 16, color: colors.inputForeground },
   clearSearchButton: { minWidth: 52, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 10, marginRight: 4, borderRadius: ui.radius.button },
   clearSearchText: { fontSize: 14, fontWeight: "700", color: colors.primary },
   suggestions: { position: "absolute", left: 0, right: 0, maxHeight: 260, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.button, backgroundColor: colors.cardBackground, overflow: "hidden", zIndex: 4, elevation: 4 },
   suggestionRow: { minHeight: 48, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.border },
   suggestionName: { fontSize: 16, fontWeight: "700", color: colors.cardForeground },
   suggestionDosage: { marginTop: 2, fontSize: 14, color: colors.textSecondary },
-  filters: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 16 },
-  form: { gap: 12, marginTop: ui.spacing.section, padding: ui.spacing.card, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
-  formTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
+  filters: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 9, paddingVertical: 0 },
+  filterChip: { minHeight: 36, paddingHorizontal: 12 },
+  form: { gap: 9, marginTop: 12, paddingHorizontal: 15, paddingVertical: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 17, backgroundColor: colors.cardBackground },
+  formTitle: { marginBottom: 2, fontSize: 18, lineHeight: 22, fontWeight: "700", color: colors.cardForeground },
   editing: { fontSize: 15, fontWeight: "600", color: colors.primary },
-  input: { minHeight: 52, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: ui.radius.button, paddingHorizontal: 14, fontSize: 16, color: colors.inputForeground, backgroundColor: colors.inputBackground },
-  formActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  field: { gap: 4 },
+  fieldLabel: { fontSize: 13, lineHeight: 17, fontWeight: "600", color: colors.textPrimary },
+  input: { minHeight: 46, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 12, paddingHorizontal: 14, fontSize: 16, color: colors.inputForeground, backgroundColor: colors.inputBackground },
+  inputFocused: { borderColor: colors.primary },
+  inputInvalid: { borderColor: colors.danger },
+  fieldError: { fontSize: 13, lineHeight: 18, color: colors.danger },
+  submitError: { padding: 10, borderRadius: ui.radius.small, backgroundColor: colors.dangerBackground, fontSize: 14, lineHeight: 20, color: colors.dangerForeground },
+  formActions: { flexDirection: "column", gap: 8, marginTop: 0 },
+  addMedicationButton: { width: "100%", minHeight: 48, marginTop: 5, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, borderRadius: 13, backgroundColor: colors.primary },
+  addMedicationButtonPressed: { backgroundColor: colors.primaryPressed },
+  addMedicationButtonText: { fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.onPrimary, textAlign: "center" },
   noChanges: { color: colors.textMuted, fontSize: 14 },
-  heading: { marginTop: ui.spacing.section, marginBottom: 12, fontSize: 19, fontWeight: "700", color: colors.textPrimary },
+  heading: { marginTop: 20, marginBottom: 12, fontSize: 19, fontWeight: "700", color: colors.textPrimary },
   card: { padding: ui.spacing.card, marginBottom: 12, borderWidth: 1, borderColor: colors.border, borderTopColor: colors.borderStrong, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
   highlightedCard: { borderColor: colors.primary, borderTopColor: colors.primary, backgroundColor: colors.secondaryBackground },
   cardTopRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 },
@@ -262,9 +358,12 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   overflowIcon: { fontSize: 25, lineHeight: 28, fontWeight: "700", color: colors.textSecondary },
   name: { fontSize: 19, fontWeight: "700", color: colors.cardForeground, flexShrink: 1 },
   dosage: { marginTop: 4, fontSize: 16, color: colors.textSecondary },
-  status: { marginTop: 12 },
+  status: { marginTop: 10, minHeight: 32, alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 6 },
   stock: { marginTop: 10, fontSize: 15, fontWeight: "700", color: colors.textSecondary },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md },
+  cardActionButton: { minHeight: 38, alignItems: "center", justifyContent: "center", paddingHorizontal: 11, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 10, backgroundColor: colors.surfaceSubtle },
+  cardActionButtonPressed: { backgroundColor: colors.primarySoft },
+  cardActionButtonText: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: colors.primary, textAlign: "center" },
   alphabetRail: { position: "absolute", right: 4, width: 28, paddingVertical: ALPHABET_RAIL_VERTICAL_PADDING, justifyContent: "flex-start", alignItems: "flex-end" },
   alphabetRailDivider: { position: "absolute", left: 0, top: 0, bottom: 0, width: 1, backgroundColor: colors.divider },
   alphabetRailButton: { width: 24, height: ALPHABET_RAIL_ROW_HEIGHT, alignItems: "center", justifyContent: "center", borderRadius: ui.radius.button },
