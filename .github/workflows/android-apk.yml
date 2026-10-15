@@ -89,7 +89,7 @@ jobs:
         env:
           ANDROID_VERSION_CODE: ${{ github.run_number }}
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           APK="android/app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
@@ -99,7 +99,7 @@ jobs:
           BADGING="$($AAPT dump badging "$APK")"
           grep -Fq "package: name='com.anonymous.mrpillpal'" <<< "$BADGING"
           grep -Fq "versionCode='${ANDROID_VERSION_CODE}'" <<< "$BADGING"
-          unzip -Z1 "$APK" | grep -Fxq 'assets/index.android.bundle'
+          unzip -Z1 "$APK" | grep -Fx 'assets/index.android.bundle' >/dev/null
           CERTIFICATE_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print $2; exit }')"
           test -n "$CERTIFICATE_SHA256"
           echo "certificate_sha256=$CERTIFICATE_SHA256" >> "$GITHUB_OUTPUT"
