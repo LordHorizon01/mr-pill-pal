@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 
 import { useAppTheme } from "@/components/app-theme-provider";
@@ -7,7 +7,7 @@ import { motion } from "@/components/motion-tokens";
 import { ContentFade, InsightsInitialSkeleton } from "@/components/loading-primitives";
 import { ScreenHeader } from "@/components/screen-header";
 import { TabContentTransition } from "@/components/tab-content-transition";
-import { ThemedButton, ThemedCard, ThemedChip } from "@/components/themed-ui";
+import { ThemedButton, ThemedChip } from "@/components/themed-ui";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { calculateRoutineAdherence } from "@/features/history/insights.domain";
 import { getRoutineInsights } from "@/features/history/history.service";
@@ -76,18 +76,22 @@ export default function InsightsScreen() {
     <TabContentTransition style={styles.screen}>
       <ScreenHeader title="Insights" />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
-        <Text style={styles.subtitle}>A neutral summary of recorded medication routines</Text>
-        <ThemedCard style={styles.reportCard}>
-          <Text style={styles.reportTitle}>Doctor / caregiver report</Text>
-          <Text style={styles.reportText}>Create a factual medication and intake summary for the selected profile.</Text>
-          <ThemedButton
-            label="Create report"
-            tone="outline"
-            onPress={() => router.push("/report-export" as never)}
+        <Text style={styles.sectionHeading}>Create report</Text>
+        <View style={styles.reportCard}>
+          <View style={styles.reportTitleSection}>
+            <Text style={styles.reportTitle}>Doctor / Caregiver Report</Text>
+          </View>
+          <View style={styles.reportDivider} />
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Create doctor or caregiver report"
-            style={styles.reportButton}
-          />
-        </ThemedCard>
+            onPress={() => router.push("/report-export" as never)}
+            style={({ pressed }) => [styles.reportAction, pressed && styles.reportActionPressed]}
+          >
+            <Text style={styles.reportActionText}>Create report</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.statsHeading}>Medication Status Overview</Text>
         <View style={styles.ranges}>
           {ranges.map((item) => (
             <ThemedChip
@@ -96,6 +100,10 @@ export default function InsightsScreen() {
               selected={range === item.value}
               onPress={() => setRange(item.value)}
               accessibilityLabel={`${item.label} insights${range === item.value ? ", selected" : ""}`}
+              style={styles.rangeChip}
+              textStyle={styles.rangeChipText}
+              hitSlop={5}
+              allowTextWrap
             />
           ))}
         </View>
@@ -121,7 +129,7 @@ export default function InsightsScreen() {
         {visibleData && hasData ? (
           <ContentFade key={`insights-data-${range}`} duration={motion.duration.skeletonCrossfade}>
             <>
-              <View style={styles.card}>
+              <View style={[styles.card, styles.firstCard]}>
                 <Text style={styles.cardTitle}>{ranges.find((item) => item.value === range)?.label}</Text>
                 <Metric label="Total eligible" value={visibleData.eligible} />
                 <Metric label="Taken" value={visibleData.taken} />
@@ -169,19 +177,26 @@ function Metric({ label, value }: { label: string; value: number }) {
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   screen: { flex: 1 },
   scroll: { flex: 1 },
-  page: { padding: ui.spacing.screen, paddingTop: 20, paddingBottom: 120 },
-  subtitle: { marginTop: 18, fontSize: 16, lineHeight: 22, color: colors.textSecondary },
-  reportCard: { marginTop: ui.spacing.section },
-  reportTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
-  reportText: { marginTop: 6, fontSize: 15, lineHeight: 21, color: colors.textSecondary },
-  reportButton: { marginTop: 14 },
-  ranges: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 16 },
+  page: { padding: ui.spacing.screen, paddingTop: 8, paddingBottom: 120 },
+  sectionHeading: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: colors.textPrimary },
+  reportCard: { marginTop: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 16, overflow: "hidden", backgroundColor: colors.surfaceRaised },
+  reportTitleSection: { alignItems: "center", paddingTop: 16, paddingBottom: 20, paddingHorizontal: 16, backgroundColor: colors.surfaceRaised },
+  reportTitle: { flexShrink: 1, fontSize: 18, lineHeight: 24, fontWeight: "700", color: colors.cardForeground, textAlign: "center" },
+  reportDivider: { height: 1, backgroundColor: colors.border },
+  reportAction: { minHeight: 48, alignItems: "center", justifyContent: "center", paddingVertical: 12, paddingHorizontal: 14, backgroundColor: colors.cardBackground },
+  reportActionPressed: { opacity: 0.84 },
+  reportActionText: { flexShrink: 1, fontSize: 15, lineHeight: 20, fontWeight: "600", color: colors.outlineForeground, textAlign: "center" },
+  statsHeading: { marginTop: 16, fontSize: 14, lineHeight: 18, fontWeight: "600", color: colors.textPrimary },
+  ranges: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8 },
+  rangeChip: { minHeight: 38, maxWidth: "100%", paddingHorizontal: 13, borderRadius: 999 },
+  rangeChipText: { flexShrink: 1, textAlign: "center", fontSize: 14, lineHeight: 18, fontWeight: "600" },
   error: { marginTop: ui.spacing.section, padding: ui.spacing.card, borderRadius: ui.radius.card, backgroundColor: colors.dangerBackground },
   errorText: { fontWeight: "700", color: colors.dangerForeground },
   empty: { marginTop: ui.spacing.section, padding: ui.spacing.card, borderRadius: ui.radius.card, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.cardBackground },
   emptyTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
   emptyText: { marginTop: 6, fontSize: 16, lineHeight: 22, color: colors.textSecondary },
   card: { marginTop: ui.spacing.section, padding: ui.spacing.card, borderWidth: 1, borderColor: colors.border, borderTopColor: colors.borderStrong, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
+  firstCard: { marginTop: 16 },
   cardTitle: { fontSize: 18, fontWeight: "700", color: colors.cardForeground },
   metric: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: colors.divider },
   metricLabel: { fontSize: 16, fontWeight: "600", color: colors.textPrimary },

@@ -75,6 +75,13 @@ async function initializeDatabaseTables(): Promise<void> {
     await transaction.execAsync(CREATE_APP_SETTINGS_TABLE);
     await transaction.execAsync(CREATE_LOCAL_PROFILES_TABLE);
 
+    const localProfileColumns = await transaction.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(local_profiles);`,
+    );
+    if (!localProfileColumns.some((column) => column.name === "profile_setup_details_json")) {
+      await transaction.execAsync(`ALTER TABLE local_profiles ADD COLUMN profile_setup_details_json TEXT;`);
+    }
+
     const inventoryEventColumns = await transaction.getAllAsync<{ name: string }>(
       `PRAGMA table_info(inventory_events);`,
     );

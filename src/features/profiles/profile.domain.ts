@@ -3,6 +3,7 @@ import {
   MedicalProfileDetails,
   Profile,
   ProfileRelationship,
+  UpdateProfileInput,
 } from "./profile.types";
 
 const RELATIONSHIPS: readonly ProfileRelationship[] = [
@@ -24,7 +25,7 @@ export function normalizeProfileInput(input: CreateProfileInput): CreateProfileI
     throw new Error("Choose a valid relationship.");
   }
   if (!dateOfBirth) {
-    return { ...input, fullName, nickname, dateOfBirth: "", medicalDetails: normalizeMedicalDetails(input.medicalDetails) };
+    return { ...input, fullName, nickname, dateOfBirth: "", medicalDetails: normalizeMedicalDetails(input.medicalDetails), profileSetupDetails: input.profileSetupDetails };
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
     throw new Error("Enter the date of birth as a valid date.");
@@ -57,7 +58,19 @@ export function normalizeProfileInput(input: CreateProfileInput): CreateProfileI
     nickname,
     dateOfBirth,
     medicalDetails: normalizeMedicalDetails(input.medicalDetails),
+    profileSetupDetails: input.profileSetupDetails,
   };
+}
+
+/** Builds a profile edit payload while retaining saved fields that this editor does not expose. */
+export function buildProfileUpdateInput(profile: Profile, input: CreateProfileInput): UpdateProfileInput {
+  const normalized = normalizeProfileInput({
+    ...input,
+    avatarUrl: input.avatarUrl === undefined ? profile.avatarUrl : input.avatarUrl,
+    medicalDetails: undefined,
+    profileSetupDetails: input.profileSetupDetails ?? profile.profileSetupDetails,
+  });
+  return { ...normalized, medicalDetails: profile.medicalDetails, profileSetupDetails: normalized.profileSetupDetails };
 }
 
 function normalizeMedicalDetails(details?: MedicalProfileDetails): MedicalProfileDetails | undefined {

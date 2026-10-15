@@ -1,12 +1,15 @@
 import {
   DarkTheme,
   DefaultTheme,
+  router,
   Stack,
   ThemeProvider as NavigationThemeProvider,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { SymbolView } from "expo-symbols";
 import {
   AppState,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -309,12 +312,24 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
       <Stack.Screen name="refill-settings" options={{ title: "Refill tracking" }} />
       <Stack.Screen name="stock-history" options={{ title: "Stock history" }} />
-      <Stack.Screen name="report-export" options={{ title: "Doctor / caregiver report" }} />
+      <Stack.Screen name="report-export" options={{
+        title: "Doctor / caregiver report",
+        ...(Platform.OS === "android" ? {
+          headerTitleAlign: "left" as const,
+          headerBackVisible: false,
+          headerTitle: ({ children }: { children: string }) => <ReportStackHeaderTitle>{children}</ReportStackHeaderTitle>,
+        } : {
+          headerTitle: ({ children }: { children: string }) => <StackHeaderTitle style={{ fontSize: 17, fontWeight: "600", marginLeft: -8 }}>{children}</StackHeaderTitle>,
+        }),
+      }} />
       <Stack.Screen name="dose-detail" options={{
         title: "Dose details",
         headerTitle: ({ children }) => <StackHeaderTitle style={{ marginLeft: -8 }}>{children}</StackHeaderTitle>,
       }} />
-      <Stack.Screen name="reminder-settings" options={{ title: "Reminders & notifications" }} />
+      <Stack.Screen name="reminder-settings" options={{
+        title: "Reminders & notifications",
+        headerTitle: ({ children }) => <StackHeaderTitle style={{ fontSize: 17, fontWeight: "600", marginLeft: -8 }}>{children}</StackHeaderTitle>,
+      }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />
     </Stack></AppDrawerProvider>
   </NavigationThemeProvider>;
@@ -329,6 +344,30 @@ function StackHeaderTitle({ children, style }: { children: string; style?: Style
   const colorStyle = useAppThemeColorStyle({ color: "textPrimary" });
   return <Animated.Text numberOfLines={1} style={[{ fontSize: 20, fontWeight: "700" }, colorStyle, style]}>{children}</Animated.Text>;
 }
+
+function ReportStackHeaderTitle({ children }: { children: string }) {
+  const { colors } = useAppTheme();
+  const canGoBack = router.canGoBack();
+  return <View style={reportStackHeaderStyles.row}>
+    {canGoBack ? <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      accessibilityHint="Return to the previous screen"
+      accessibilityState={{ disabled: false }}
+      onPress={() => router.back()}
+      style={({ pressed }) => [reportStackHeaderStyles.backButton, pressed && reportStackHeaderStyles.backButtonPressed]}
+    >
+      <SymbolView accessibilityElementsHidden name={{ ios: "arrow.left", android: "arrow_back", web: "arrow_back" }} size={24} tintColor={colors.primary} />
+    </Pressable> : null}
+    <StackHeaderTitle style={{ flexShrink: 1, fontSize: 17, fontWeight: "600" }}>{children}</StackHeaderTitle>
+  </View>;
+}
+
+const reportStackHeaderStyles = StyleSheet.create({
+  row: { width: "100%", flexDirection: "row", alignItems: "center", gap: 8 },
+  backButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  backButtonPressed: { opacity: 0.72 },
+});
 
 const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   errorContainer: {

@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { router } from "expo-router";
+import { router, useSegments } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SymbolView } from "expo-symbols";
 import { useAppTheme } from "@/components/app-theme-provider";
@@ -12,6 +12,7 @@ import { Profile } from "@/features/profiles/profile.types";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useProfileStore } from "@/state/profile.store";
 import { useAuthStore } from "@/state/auth.store";
+import { DRAWER_TAB_DESTINATIONS, getSelectedDrawerDestination } from "@/features/navigation/navigation.domain";
 
 type ProfileSwitcherContextValue = { openProfileSwitcher: () => void; openDrawer: () => void };
 const ProfileSwitcherContext = createContext<ProfileSwitcherContextValue | null>(null);
@@ -35,6 +36,8 @@ export function AppDrawerProvider({ children }: { children: ReactNode }) {
   const profiles = useProfileStore((state) => state.profiles);
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
   const selectProfile = useProfileStore((state) => state.selectProfile);
+  const segments = useSegments();
+  const selectedDestination = getSelectedDrawerDestination(segments);
   const logout = useAuthStore((state) => state.logout);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const styles = createStyles(colors);
@@ -84,6 +87,9 @@ export function AppDrawerProvider({ children }: { children: ReactNode }) {
   function openSettingsFromDrawer() {
     closeDrawer(() => router.push("/settings" as never));
   }
+  function openSelectedProfileFromDrawer() {
+    closeDrawer(() => router.navigate("/(tabs)/profile" as never));
+  }
   async function signOutFromDrawer() {
     if (isSigningOut) return;
     setIsSigningOut(true);
@@ -127,18 +133,43 @@ export function AppDrawerProvider({ children }: { children: ReactNode }) {
           <Animated.View accessibilityViewIsModal style={[styles.drawerPanel, { width: drawerWidth, transform: [{ translateX: drawerTranslateX }] }]}>
             <SafeAreaView edges={["top", "bottom", "left"]} style={styles.drawerSafe}>
               <Image accessibilityLabel="Mr. Pill Pal" accessible source={primaryLogo} resizeMode="contain" style={styles.drawerBrandLogo} />
-              <Pressable accessibilityRole="button" accessibilityLabel="Open Profiles" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={openProfilesFromDrawer} style={styles.drawerItem}>
-                <Text style={styles.drawerItemText}>Profiles</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel="Open Settings" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={openSettingsFromDrawer} style={styles.drawerItem}>
-                <Text style={styles.drawerItemText}>Settings</Text>
-              </Pressable>
-              <View style={styles.drawerSpacer} />
-              <View style={styles.drawerDivider} />
-              {drawerError ? <Text accessibilityRole="alert" style={styles.drawerError}>{drawerError}</Text> : null}
-              <Pressable accessibilityRole="button" accessibilityLabel="Sign out of Mr. Pill Pal" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={() => void signOutFromDrawer()} style={styles.signOutItem}>
-                <Text style={styles.signOutText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
-              </Pressable>
+              <ScrollView bounces={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.drawerScrollContent}>
+                <Pressable accessibilityRole="button" accessibilityLabel={selectedProfile ? `Open Profile tab for ${getProfileGreetingName(selectedProfile) ?? selectedProfile.fullName}` : "Open Profile tab"} accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={openSelectedProfileFromDrawer} style={styles.currentProfileRow}>
+                  {selectedProfile ? <ProfileAvatar profile={selectedProfile} size={48} /> : <View style={styles.profilePlaceholder}><SymbolView accessibilityElementsHidden name={{ ios: "person.crop.circle.fill", android: "account_circle", web: "account_circle" }} size={28} tintColor={colors.textSecondary} /></View>}
+                  <View style={styles.profileCopy}>
+                    <Text numberOfLines={1} style={styles.profileName}>{selectedProfile ? getProfileGreetingName(selectedProfile) ?? selectedProfile.fullName : "No profile selected"}</Text>
+                    <Text numberOfLines={1} style={styles.relationship}>{selectedProfile?.relationship ?? "Select a profile to continue"}</Text>
+                  </View>
+                </Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Switch profile" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={openProfilesFromDrawer} style={styles.switchProfileButton}>
+                  <SymbolView accessibilityElementsHidden name={{ ios: "person.2", android: "switch_account", web: "switch_account" }} size={18} tintColor={colors.primary} />
+                  <Text style={styles.switchProfileText}>Switch profile</Text>
+                </Pressable>
+                <View style={styles.drawerDivider} />
+                <View style={styles.drawerNavigation}>
+                  {DRAWER_TAB_DESTINATIONS.map((destination) => {
+                    const selected = selectedDestination === destination.key;
+                    return <Pressable key={destination.key} accessibilityRole="button" accessibilityLabel={destination.label} accessibilityState={{ selected, disabled: isSigningOut }} disabled={isSigningOut} onPress={() => closeDrawer(() => router.navigate(destination.route as never))} style={[styles.drawerNavigationItem, selected && styles.drawerNavigationItemSelected]}>
+                      <View style={[styles.drawerNavigationIndicator, selected && styles.drawerNavigationIndicatorSelected]} />
+                      <SymbolView accessibilityElementsHidden name={{ ios: destination.ios as never, android: destination.android as never, web: destination.android as never }} size={21} tintColor={selected ? colors.navigationSelectedText : colors.navigationInactive} />
+                      <Text style={[styles.drawerNavigationText, selected && styles.drawerNavigationTextSelected]}>{destination.label}</Text>
+                    </Pressable>;
+                  })}
+                </View>
+              </ScrollView>
+              <View style={styles.drawerBottom}>
+                <View style={styles.drawerDivider} />
+                <Pressable accessibilityRole="button" accessibilityLabel="Open Settings" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={openSettingsFromDrawer} style={styles.drawerSecondaryItem}>
+                  <SymbolView accessibilityElementsHidden name={{ ios: "gearshape", android: "settings", web: "settings" }} size={21} tintColor={colors.navigationInactive} />
+                  <Text style={styles.drawerNavigationText}>Settings</Text>
+                </Pressable>
+                <View style={styles.drawerDivider} />
+                {drawerError ? <Text accessibilityRole="alert" style={styles.drawerError}>{drawerError}</Text> : null}
+                <Pressable accessibilityRole="button" accessibilityLabel="Sign out of Mr. Pill Pal" accessibilityState={{ disabled: isSigningOut }} disabled={isSigningOut} onPress={() => void signOutFromDrawer()} style={styles.signOutItem}>
+                  <SymbolView accessibilityElementsHidden name={{ ios: "rectangle.portrait.and.arrow.right", android: "logout", web: "logout" }} size={20} tintColor={colors.dangerForeground} />
+                  <Text style={styles.signOutText}>{isSigningOut ? "Signing out…" : "Sign out"}</Text>
+                </Pressable>
+              </View>
             </SafeAreaView>
           </Animated.View>
         </View>
@@ -216,15 +247,26 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>["colors"]) => Style
   drawerOverlay: { flex: 1, flexDirection: "row", backgroundColor: "transparent" },
   drawerBackdrop: { backgroundColor: "rgba(10, 22, 35, 0.36)" },
   drawerPanel: { height: "100%", backgroundColor: colors.surfaceRaised, elevation: 16, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 4, height: 0 } },
-  drawerSafe: { flex: 1, paddingHorizontal: ui.spacing.screen, paddingTop: ui.spacing.lg, paddingBottom: ui.spacing.xs },
-  drawerBrandLogo: { width: 160, height: 160 / 3, marginBottom: ui.spacing.lg, alignSelf: "flex-start" },
-  drawerItem: { minHeight: ui.touch.minimum, justifyContent: "center", borderRadius: ui.radius.medium },
-  drawerItemText: { ...ui.typography.bodyStrong, color: colors.textPrimary },
-  drawerSpacer: { flex: 1 },
-  drawerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginBottom: ui.spacing.sm },
+  drawerSafe: { flex: 1, paddingHorizontal: 16, paddingTop: ui.spacing.sm, paddingBottom: ui.spacing.xs },
+  drawerBrandLogo: { width: 160, height: 160 / 3, marginBottom: ui.spacing.sm, alignSelf: "flex-start" },
+  drawerScrollContent: { flexGrow: 1, paddingBottom: ui.spacing.sm },
+  currentProfileRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 5 },
+  profilePlaceholder: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 24, backgroundColor: colors.surfaceSubtle },
+  switchProfileButton: { minHeight: 44, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.button, backgroundColor: colors.surfaceSubtle },
+  switchProfileText: { ...ui.typography.label, color: colors.primary },
+  drawerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: ui.spacing.sm },
+  drawerNavigation: { gap: 3 },
+  drawerNavigationItem: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 0, borderWidth: 1, borderColor: "transparent", borderRadius: ui.radius.medium },
+  drawerNavigationItemSelected: { backgroundColor: colors.navigationSelected, borderColor: colors.navigationBorder },
+  drawerNavigationIndicator: { width: 3, height: 24, borderRadius: 2, backgroundColor: "transparent" },
+  drawerNavigationIndicatorSelected: { backgroundColor: colors.primary },
+  drawerNavigationText: { flex: 1, flexShrink: 1, ...ui.typography.label, color: colors.navigationInactive, fontSize: 14 },
+  drawerNavigationTextSelected: { color: colors.navigationSelectedText, fontWeight: "700" },
+  drawerBottom: { flexShrink: 0 },
+  drawerSecondaryItem: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 11 },
   drawerError: { ...ui.typography.supporting, color: colors.danger, marginBottom: ui.spacing.xs },
-  signOutItem: { minHeight: ui.touch.minimum, justifyContent: "center", borderRadius: ui.radius.medium },
-  signOutText: { ...ui.typography.bodyStrong, color: colors.dangerForeground },
+  signOutItem: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 11, borderRadius: ui.radius.medium },
+  signOutText: { ...ui.typography.label, color: colors.dangerForeground, fontSize: 14, fontWeight: "700" },
   overlay: { flex: 1, justifyContent: "flex-end" },
   backdrop: { backgroundColor: "rgba(10, 22, 35, 0.48)" },
   sheet: { maxHeight: "82%", borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surfaceRaised, overflow: "hidden", elevation: 16, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: -4 } },

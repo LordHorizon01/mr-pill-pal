@@ -1,4 +1,15 @@
-import { CreateProfileInput, Profile, ProfileRole } from "./profile.types";
+import {
+  CreateProfileInput,
+  Profile,
+  ProfileGender,
+  ProfileRelationshipKind,
+  ProfileReminderPreference,
+  ProfileAnswerField,
+  ProfileAnswerStatus,
+  ProfileRole,
+  ProfileSetupDetails,
+  ProfileType,
+} from "./profile.types";
 
 export type ProfileSetupStage =
   | "validate-form"
@@ -35,11 +46,11 @@ export type AccountDocumentDraft = {
 };
 
 export type AccountProfileSetupState = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
-export type AccountProfileGender = "woman" | "man" | "nonbinary" | "prefer_not_to_say" | "other";
+export type AccountProfileGender = ProfileGender;
 export type AccountProfileSetupStep = AccountProfileSetupDraft["activeStep"];
-export type AccountProfileType = "me" | "care_for";
-export type AccountProfileRelationship = "parent" | "partner" | "child" | "relative" | "friend" | "other";
-export type AccountReminderPreference = "sound_vibration" | "sound" | "vibration" | "quiet";
+export type AccountProfileType = ProfileType;
+export type AccountProfileRelationship = ProfileRelationshipKind;
+export type AccountReminderPreference = ProfileReminderPreference;
 
 export type AccountProfileSetupDraft = {
   displayName: string | null;
@@ -52,8 +63,19 @@ export type AccountProfileSetupDraft = {
   relationship: AccountProfileRelationship | null;
   relationshipOther: string | null;
   reminderPreference: AccountReminderPreference | null;
+  /** Optional for compatibility with setup drafts written by earlier app versions. */
+  answerStates?: Partial<Record<ProfileAnswerField, ProfileAnswerStatus>>;
   activeStep: "name" | "gender" | "dob" | "avatar" | "profileType" | "relationship" | "reminder" | "review" | "handoff";
 };
+
+export function toggleOptionalProfileChoice<T extends string>(
+  currentValue: T | null | undefined,
+  tappedValue: T,
+): { value: T | null; status: "answered" | "unanswered" } {
+  return currentValue === tappedValue
+    ? { value: null, status: "unanswered" }
+    : { value: tappedValue, status: "answered" };
+}
 
 export const DOB_MIN_YEAR = 1900;
 
@@ -80,9 +102,41 @@ export function createDobValue(year: number, month: number, day: number): string
 export function getProfileSetupAvatarUrl(draft: Pick<AccountProfileSetupDraft, "avatarUri" | "avatarPreset" | "gender">): string {
   if (draft.avatarUri) return draft.avatarUri;
   if (/^avatar-preset-0[1-8]$/.test(draft.avatarPreset ?? "")) return `preset:${draft.avatarPreset}`;
-  if (draft.gender === "man") return "default:male";
-  if (draft.gender === "woman") return "default:female";
   return "default:neutral";
+}
+
+export function buildAccountProfileSetupDetails(
+  draft: AccountProfileSetupDraft,
+  fallbacks: { fullName?: string; relationship?: Profile["relationship"] } = {},
+): ProfileSetupDetails {
+  const isTemporaryName = /^User\s+\d+$/i.test(draft.displayName?.trim() ?? "");
+  const answerStates: Partial<Record<ProfileAnswerField, ProfileAnswerStatus>> = {
+    fullName: draft.answerStates?.fullName ?? (draft.displayName && !isTemporaryName ? "answered" : "unanswered"),
+    gender: draft.answerStates?.gender ?? (draft.gender ? "answered" : "unanswered"),
+    dateOfBirth: draft.answerStates?.dateOfBirth ?? (draft.dateOfBirth ? "answered" : "unanswered"),
+    avatar: draft.answerStates?.avatar ?? (draft.avatarUri || draft.avatarPreset ? "answered" : "unanswered"),
+    profileType: draft.answerStates?.profileType ?? (draft.profileType ? "answered" : "unanswered"),
+    relationship: draft.profileType === "me"
+      ? "derived"
+      : draft.answerStates?.relationship ?? (draft.relationship ? "answered" : "unanswered"),
+    reminderPreference: draft.answerStates?.reminderPreference ?? (draft.reminderPreference ? "answered" : "unanswered"),
+  };
+  const systemFallbacks: NonNullable<ProfileSetupDetails["systemFallbacks"]> = {};
+  if (fallbacks.fullName && answerStates.fullName !== "answered") systemFallbacks.fullName = fallbacks.fullName;
+  if (fallbacks.relationship && answerStates.relationship !== "answered" && answerStates.relationship !== "derived") {
+    systemFallbacks.relationship = fallbacks.relationship;
+  }
+
+  return {
+    gender: draft.gender,
+    genderOther: draft.gender === "other" ? draft.genderOther : null,
+    profileType: draft.profileType,
+    relationshipKind: draft.profileType === "care_for" ? draft.relationship : null,
+    relationshipOther: draft.profileType === "care_for" && draft.relationship === "other" ? draft.relationshipOther : null,
+    reminderPreference: draft.reminderPreference,
+    answerStates,
+    ...(Object.keys(systemFallbacks).length ? { systemFallbacks } : {}),
+  };
 }
 
 export type ProfileDocumentDraft = {
@@ -95,6 +149,7 @@ export type ProfileDocumentDraft = {
   avatarUrl?: string;
   nickname?: string;
   medicalDetails?: Profile["medicalDetails"];
+  profileSetupDetails?: ProfileSetupDetails;
 };
 
 export function buildAccountDocumentDraft(
@@ -118,6 +173,15 @@ export function buildAccountDocumentDraft(
       relationship: null,
       relationshipOther: null,
       reminderPreference: null,
+      answerStates: {
+        fullName: "unanswered",
+        gender: "unanswered",
+        dateOfBirth: "unanswered",
+        avatar: "unanswered",
+        profileType: "unanswered",
+        relationship: "unanswered",
+        reminderPreference: "unanswered",
+      },
       activeStep: "name",
     },
   };
@@ -153,6 +217,7 @@ export function buildProfileDocumentDraft(
   if (input.avatarUrl) document.avatarUrl = input.avatarUrl;
   if (input.dateOfBirth) document.dateOfBirth = input.dateOfBirth;
   if (input.medicalDetails) document.medicalDetails = input.medicalDetails;
+  if (input.profileSetupDetails) document.profileSetupDetails = input.profileSetupDetails;
 
   return document;
 }

@@ -201,6 +201,7 @@ export const CREATE_LOCAL_PROFILES_TABLE = `
     relationship TEXT NOT NULL,
     avatar_url TEXT,
     medical_details_json TEXT,
+    profile_setup_details_json TEXT,
     role TEXT NOT NULL DEFAULT 'SELF',
     is_active INTEGER NOT NULL DEFAULT 1,
     deleted_at TEXT,

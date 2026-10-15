@@ -46,11 +46,12 @@ export default function ProfileHubScreen() {
   const remainingDoses = profileDoses.filter((dose) => dose.status === "pending").length;
 
   return <TabContentTransition style={styles.container}>
-    <ScreenHeader title="Profile" />
     <ScrollView contentContainerStyle={styles.content}>
+      <ScreenHeader title="Profile" rightAction={{ accessibilityLabel: "Open settings", onPress: () => router.push("/settings") }} />
+      <View style={styles.pageContent}>
       {profile ? <>
         <View style={styles.identity}>
-          <ProfileAvatar profile={profile} size={112} />
+          <ProfileAvatar profile={profile} size={96} />
           <Text accessibilityRole="header" style={styles.name}>{getProfileDisplayName(profile)}</Text>
           <Text style={styles.relationship}>{profile.relationship === "Self" ? "Personal profile" : `${profile.relationship} profile`}</Text>
           <ThemedButton label="Edit profile" tone="outline" accessibilityLabel={`Edit ${getProfileDisplayName(profile)} profile`} onPress={() => router.push("/profiles")} style={styles.editButton} />
@@ -79,6 +80,7 @@ export default function ProfileHubScreen() {
         <Text style={styles.emptyText}>Choose or create a profile to view its medication overview.</Text>
         <ThemedButton label="Manage profiles" accessibilityLabel="Open profile management" onPress={() => router.push("/profiles")} style={styles.toolButton} />
       </View>}
+      </View>
     </ScrollView>
   </TabContentTransition>;
 }
@@ -99,16 +101,17 @@ function formatDate(value: string) {
 
 const createStyles = (colors: ReturnType<typeof useAppTheme>["colors"]) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { flexGrow: 1, padding: ui.spacing.screen, paddingTop: ui.spacing.md, paddingBottom: 120, gap: ui.spacing.section },
-  identity: { alignItems: "center", paddingVertical: ui.spacing.md, gap: ui.spacing.xs },
-  name: { maxWidth: "100%", textAlign: "center", fontSize: 24, lineHeight: 30, fontWeight: "800", color: colors.textPrimary },
-  relationship: { fontSize: 15, fontWeight: "600", color: colors.textSecondary },
-  editButton: { minWidth: 160, marginTop: ui.spacing.xs },
-  section: { padding: ui.spacing.card, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
-  sectionTitle: { marginBottom: ui.spacing.xs, fontSize: 17, fontWeight: "800", color: colors.cardForeground },
-  detailRow: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: ui.spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  detailLabel: { flex: 1, fontSize: 15, color: colors.textSecondary },
-  detailValue: { flex: 1, fontSize: 15, fontWeight: "700", textAlign: "right", color: colors.textPrimary },
+  content: { flexGrow: 1, paddingBottom: 120, gap: ui.spacing.sm },
+  pageContent: { paddingHorizontal: ui.spacing.screen, gap: ui.spacing.sm },
+  identity: { alignItems: "center", paddingVertical: ui.spacing.xs, gap: ui.spacing.xxs },
+  name: { maxWidth: "100%", textAlign: "center", fontSize: 22, lineHeight: 28, fontWeight: "700", color: colors.textPrimary },
+  relationship: { fontSize: 14, fontWeight: "500", color: colors.textPrimary, textAlign: "center" },
+  editButton: { minWidth: 144, marginTop: ui.spacing.xxs },
+  section: { padding: 14, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.card, backgroundColor: colors.cardBackground },
+  sectionTitle: { marginBottom: ui.spacing.xxs, fontSize: 16, fontWeight: "700", color: colors.cardForeground },
+  detailRow: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: ui.spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  detailLabel: { flex: 1, fontSize: 14, fontWeight: "500", color: colors.textPrimary },
+  detailValue: { flex: 1, fontSize: 14, fontWeight: "700", textAlign: "right", color: colors.textPrimary },
   toolButton: { marginTop: ui.spacing.xs },
   empty: { paddingVertical: ui.spacing.xl, gap: ui.spacing.xs },
   emptyText: { fontSize: 15, lineHeight: 22, color: colors.textSecondary },

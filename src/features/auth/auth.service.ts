@@ -9,6 +9,7 @@ import {
   AccountProfileSetupState,
   buildAccountDocumentDraft,
 } from "@/features/profiles/profile-setup.domain";
+import { ProfileAnswerField, ProfileAnswerStatus } from "@/features/profiles/profile.types";
 
 export type AuthUser = auth.User;
 export type GoogleSignInResult = { cancelled: boolean };
@@ -115,9 +116,22 @@ function sanitizeProfileSetupDraft(value: FirestoreAccount["profileSetupDraft"])
   const gender = value?.gender === "woman" || value?.gender === "man" || value?.gender === "nonbinary" || value?.gender === "prefer_not_to_say" || value?.gender === "other" ? value.gender : null;
   const genderOther = typeof value?.genderOther === "string" && value.genderOther.trim() ? value.genderOther.trim() : null;
   const profileType = value?.profileType === "me" || value?.profileType === "care_for" ? value.profileType : null;
-  const relationship = ["parent", "partner", "child", "relative", "friend", "other"].includes(String(value?.relationship)) ? value?.relationship ?? null : null;
+  const relationship = profileType === "care_for" && ["parent", "partner", "child", "relative", "friend", "other"].includes(String(value?.relationship)) ? value?.relationship ?? null : null;
   const reminderPreference = ["sound_vibration", "sound", "vibration", "quiet"].includes(String(value?.reminderPreference)) ? value?.reminderPreference ?? null : null;
   const validSteps = ["name", "gender", "dob", "avatar", "profileType", "relationship", "reminder", "review", "handoff"] as const;
+  const answerFields: ProfileAnswerField[] = ["fullName", "gender", "dateOfBirth", "avatar", "profileType", "relationship", "reminderPreference"];
+  const answerStates: Partial<Record<ProfileAnswerField, ProfileAnswerStatus>> = {};
+  for (const field of answerFields) {
+    const status = value?.answerStates?.[field];
+    if (status === "unanswered" || status === "skipped" || status === "answered" || status === "derived") answerStates[field] = status;
+  }
+  answerStates.fullName ??= displayName && !/^User\s+\d+$/i.test(displayName) ? "answered" : "unanswered";
+  answerStates.gender ??= gender ? "answered" : "unanswered";
+  answerStates.dateOfBirth ??= typeof value?.dateOfBirth === "string" && value.dateOfBirth ? "answered" : "unanswered";
+  answerStates.avatar ??= typeof value?.avatarUri === "string" && value.avatarUri || typeof value?.avatarPreset === "string" && value.avatarPreset ? "answered" : "unanswered";
+  answerStates.profileType ??= profileType ? "answered" : "unanswered";
+  answerStates.relationship = profileType === "me" ? "derived" : answerStates.relationship ?? (relationship ? "answered" : "unanswered");
+  answerStates.reminderPreference ??= reminderPreference ? "answered" : "unanswered";
   return {
     displayName,
     gender,
@@ -129,6 +143,7 @@ function sanitizeProfileSetupDraft(value: FirestoreAccount["profileSetupDraft"])
     relationship,
     relationshipOther: relationship === "other" && typeof value?.relationshipOther === "string" ? value.relationshipOther : null,
     reminderPreference,
+    answerStates,
     activeStep: validSteps.includes(value?.activeStep as typeof validSteps[number]) ? value?.activeStep as AccountProfileSetupDraft["activeStep"] : "name",
   };
 }

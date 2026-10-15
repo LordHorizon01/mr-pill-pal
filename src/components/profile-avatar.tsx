@@ -18,7 +18,7 @@ const presetAvatars: Record<string, ImageSourcePropType> = {
   "avatar-preset-08": require("../../assets/ui/shared/avatars/avatar-preset-08.png"),
 };
 
-export function getProfileAvatarSource(profile: Profile | null): ImageSourcePropType {
+export function getProfileAvatarSource(profile: Pick<Profile, "avatarUrl"> | null): ImageSourcePropType {
   const value = profile?.avatarUrl?.trim();
   if (!value) return neutralAvatar;
   if (value.startsWith("preset:")) return presetAvatars[value.slice("preset:".length)] ?? neutralAvatar;
@@ -28,15 +28,14 @@ export function getProfileAvatarSource(profile: Profile | null): ImageSourceProp
   return { uri: value };
 }
 
-export function ProfileAvatar({ profile, size = 42 }: { profile: Profile | null; size?: number }) {
+export function ProfileAvatar({ profile, size = 42 }: { profile: Pick<Profile, "avatarUrl"> | null; size?: number }) {
   const { colors } = useAppTheme();
   const avatarUrl = profile?.avatarUrl?.trim() ?? null;
-  const uri = avatarUrl && !avatarUrl.startsWith("preset:") && !avatarUrl.startsWith("default:") ? avatarUrl : null;
-  const [failedUri, setFailedUri] = useState<string | null>(null);
-  const source = uri && failedUri === uri ? neutralAvatar : getProfileAvatarSource(profile);
+  const [failedAvatarKey, setFailedAvatarKey] = useState<string | null>(null);
+  const source = failedAvatarKey === avatarUrl ? neutralAvatar : getProfileAvatarSource(profile);
   return (
     <View accessible={false} style={[styles.frame, { width: size, height: size, borderRadius: size / 2, backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
-      <Image accessibilityElementsHidden source={source} resizeMode={source === neutralAvatar ? "contain" : "cover"} style={StyleSheet.absoluteFill} onError={() => { if (uri) setFailedUri(uri); }} />
+      <Image accessibilityElementsHidden source={source} resizeMode={source === neutralAvatar ? "contain" : "cover"} style={{ width: Math.max(0, size - 2), height: Math.max(0, size - 2) }} onError={() => { if (source !== neutralAvatar) setFailedAvatarKey(avatarUrl); }} />
     </View>
   );
 }

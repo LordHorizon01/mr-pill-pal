@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { SymbolView } from "expo-symbols";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppDrawer } from "@/components/app-drawer";
 import { useAppTheme, useAppThemeColorStyle } from "@/components/app-theme-provider";
@@ -18,9 +19,15 @@ const logoWordmarkStartRatio = (823 - 173) / (2226 - 173);
 const logoWordmarkBottomRatio = (577 - 107) / (693 - 107);
 const logoVisibleAspectRatio = (2226 - 173) / (693 - 107);
 
-type ScreenHeaderProps = { title: string; variant?: "home" | "page"; greeting?: string; date?: string };
+type ScreenHeaderProps = {
+  title: string;
+  variant?: "home" | "page";
+  greeting?: string;
+  date?: string;
+  rightAction?: { accessibilityLabel: string; onPress: () => void };
+};
 
-export function ScreenHeader({ title, variant = "page", greeting, date }: ScreenHeaderProps) {
+export function ScreenHeader({ title, variant = "page", greeting, date, rightAction }: ScreenHeaderProps) {
   const { openDrawer } = useAppDrawer();
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -34,6 +41,7 @@ export function ScreenHeader({ title, variant = "page", greeting, date }: Screen
   const logoWidth = Math.min(logoWidthTarget, Math.max(0, width - homeBrandInset * 2));
   const logoHeight = logoWidth / logoVisibleAspectRatio;
   const heading = greeting ?? title;
+  const pageHeaderRowWidth = rightAction ? width - pageHeaderInset - 2 : width - pageHeaderInset * 2;
   const wordmarkStartX = homeBrandInset + logoOpticalOffsetX + logoWidth * logoWordmarkStartRatio;
   const symbolCenterX = homeBrandInset + logoOpticalOffsetX + logoWidth * logoSymbolCenterRatio;
   const wordmarkDividerY = logoHeight * logoWordmarkBottomRatio + 2.5;
@@ -73,7 +81,11 @@ export function ScreenHeader({ title, variant = "page", greeting, date }: Screen
           </Animated.View>
         </Pressable>
         <View
-          onLayout={(event) => setHomeCopyHeight((previous) => Math.abs(previous - event.nativeEvent.layout.height) < 0.5 ? previous : event.nativeEvent.layout.height)}
+          onLayout={(event) => {
+            const height = event.nativeEvent?.layout?.height;
+            if (typeof height !== "number" || !Number.isFinite(height)) return;
+            setHomeCopyHeight((previous) => Math.abs(previous - height) < 0.5 ? previous : height);
+          }}
           style={[styles.homeCopy, { left: wordmarkStartX, right: 16, top: homeCopyTop }]}
         >
           <Text accessibilityRole="header" style={styles.homeTitle}>
@@ -84,7 +96,7 @@ export function ScreenHeader({ title, variant = "page", greeting, date }: Screen
       </View>
     </View> : null}
     {!isHome ? <View style={{ paddingTop: insets.top + 2, paddingHorizontal: pageHeaderInset }}>
-      <View style={{ width: width - pageHeaderInset * 2, height: pageHeaderRowHeight, position: "relative" }}>
+      <View style={{ width: pageHeaderRowWidth, height: pageHeaderRowHeight, position: "relative" }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open navigation menu"
@@ -101,9 +113,23 @@ export function ScreenHeader({ title, variant = "page", greeting, date }: Screen
             </View>
           </Animated.View>
         </Pressable>
-        <View style={[styles.pageCopy, { left: symbolCenterX - pageHeaderInset + 27, right: 0, top: 3 }]}>
-          <Text accessibilityRole="header" onLayout={(event) => setPageTitleHeight((previous) => Math.abs(previous - event.nativeEvent.layout.height) < 0.5 ? previous : event.nativeEvent.layout.height)} style={styles.pageTitle}>{heading}</Text>
+        <View style={[styles.pageCopy, { left: symbolCenterX - pageHeaderInset + 27, right: rightAction ? 54 : 0, top: 3 }]}>
+          <Text accessibilityRole="header" onLayout={(event) => {
+            const height = event.nativeEvent?.layout?.height;
+            if (typeof height !== "number" || !Number.isFinite(height)) return;
+            setPageTitleHeight((previous) => Math.abs(previous - height) < 0.5 ? previous : height);
+          }} style={styles.pageTitle}>{heading}</Text>
         </View>
+        {rightAction ? <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={rightAction.accessibilityLabel}
+          onPress={rightAction.onPress}
+          style={({ pressed }) => [styles.rightAction, pressed && styles.rightActionPressed]}
+        >
+          <View pointerEvents="none" style={styles.rightActionCircle}>
+            <SymbolView accessibilityElementsHidden name={{ ios: "gearshape.fill", android: "settings", web: "settings" }} size={23} tintColor={colors.primary} />
+          </View>
+        </Pressable> : null}
       </View>
     </View> : null}
   </Animated.View>;
@@ -125,5 +151,8 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   homeGreetingPrefix: { fontSize: 16, lineHeight: 20, fontWeight: "400", color: colors.textPrimary },
   homeGreetingName: { fontSize: 16, lineHeight: 20, fontWeight: "600", color: colors.textPrimary },
   pageTitle: { fontSize: 20, lineHeight: 26, fontWeight: "600", color: colors.textPrimary },
+  rightAction: { position: "absolute", top: 0, right: 0, width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  rightActionCircle: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 19, backgroundColor: colors.surfaceSubtle, transform: [{ translateY: -7 }] },
+  rightActionPressed: { opacity: 0.68 },
   date: { marginTop: 1, fontSize: 12.5, lineHeight: 15, color: colors.textSecondary },
 });
