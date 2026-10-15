@@ -1,0 +1,163 @@
+name: Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - kshitij-month3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and publish standalone APK
+    if: github.ref_name == 'main' || github.ref_name == 'kshitij-month3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Configure Firebase and persistent Android signing
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in GOOGLE_SERVICES_JSON ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub Actions secret: ${name}" >&2
+              exit 1
+            fi
+          done
+          printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mr-pill-pal-release.keystore"
+          node -e 'const config = require("./google-services.json"); if (!config.client?.some((client) => client.client_info?.android_client_info?.package_name === "com.anonymous.mrpillpal")) { throw new Error("GOOGLE_SERVICES_JSON has no Android client for com.anonymous.mrpillpal."); }'
+          keytool -list -keystore "$RUNNER_TEMP/mr-pill-pal-release.keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install --non-interactive
+
+      - name: Configure version code and release signing
+        env:
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mr-pill-pal-release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: node scripts/prepare-android-ci-build.cjs
+
+      - name: Build release APK with bundled production JavaScript
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mr-pill-pal-release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash android/gradlew --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Verify APK package, version, bundle, and signature
+        id: verify-apk
+        env:
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          test -x "$APKSIGNER"
+          BADGING="$($AAPT dump badging "$APK")"
+          grep -Fq "package: name='com.anonymous.mrpillpal'" <<< "$BADGING"
+          grep -Fq "versionCode='${ANDROID_VERSION_CODE}'" <<< "$BADGING"
+          unzip -Z1 "$APK" | grep -Fxq 'assets/index.android.bundle'
+          CERTIFICATE_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ { print $2; exit }')"
+          test -n "$CERTIFICATE_SHA256"
+          echo "certificate_sha256=$CERTIFICATE_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Select distribution channel and filenames
+        id: channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            CHANNEL="stable"
+            RELEASE_TAG="latest-apk"
+            RELEASE_TITLE="Latest stable Android APK"
+            LATEST_ASSET="mr-pill-pal-stable-latest.apk"
+            PRERELEASE="false"
+            MAKE_LATEST="true"
+          else
+            CHANNEL="month3"
+            RELEASE_TAG="latest-month3"
+            RELEASE_TITLE="Latest Month 3 Android APK"
+            LATEST_ASSET="mr-pill-pal-month3-latest.apk"
+            PRERELEASE="true"
+            MAKE_LATEST="false"
+          fi
+          VERSIONED_ASSET="mr-pill-pal-${CHANNEL}-build-${GITHUB_RUN_NUMBER}-${SHORT_SHA}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$VERSIONED_ASSET"
+          cp "$VERSIONED_ASSET" "$LATEST_ASSET"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
+          echo "latest_asset=$LATEST_ASSET" >> "$GITHUB_OUTPUT"
+          echo "versioned_asset=$VERSIONED_ASSET" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "make_latest=$MAKE_LATEST" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mr-pill-pal-${{ steps.channel.outputs.channel }}-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ${{ steps.channel.outputs.versioned_asset }}
+            ${{ steps.channel.outputs.latest_asset }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish channel release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.channel.outputs.release_tag }}
+          name: ${{ steps.channel.outputs.release_title }}
+          body: |
+            Source branch: `${{ github.ref_name }}`
+            Source commit: `${{ github.sha }}`
+            Android version code: `${{ github.run_number }}`
+            Signing certificate SHA-256: `${{ steps.verify-apk.outputs.certificate_sha256 }}`
+          prerelease: ${{ steps.channel.outputs.prerelease }}
+          make_latest: ${{ steps.channel.outputs.make_latest }}
+          files: |
+            ${{ steps.channel.outputs.versioned_asset }}
+            ${{ steps.channel.outputs.latest_asset }}
+          fail_on_unmatched_files: true
