@@ -17,6 +17,7 @@ import {
   CREATE_SCHEDULE_PROFILE_INDEX,
   CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX,
   CREATE_INVENTORY_EVENTS_HISTORY_INDEX,
+  CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX,
   CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX,
   CREATE_REFILL_ALERT_STATES_ACCOUNT_INDEX,
   CREATE_REFILL_ALERT_STATES_TABLE,
@@ -25,6 +26,9 @@ import {
   CREATE_INVENTORY_EVENTS_TABLE,
   CREATE_REMINDER_OCCURRENCES_TABLE,
   CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX,
+  CREATE_NOTIFICATION_EVENTS_TABLE,
+  CREATE_NOTIFICATION_EVENTS_HISTORY_INDEX,
+  CREATE_NOTIFICATION_EVENTS_UNREAD_INDEX,
 } from "./schema/schema";
 
 const DATABASE_NAME = "mr-pill-pal.db";
@@ -74,6 +78,9 @@ async function initializeDatabaseTables(): Promise<void> {
     await transaction.execAsync(CREATE_DOSE_RECORDS_TABLE);
     await transaction.execAsync(CREATE_APP_SETTINGS_TABLE);
     await transaction.execAsync(CREATE_LOCAL_PROFILES_TABLE);
+    await transaction.execAsync(CREATE_NOTIFICATION_EVENTS_TABLE);
+    await transaction.execAsync(CREATE_NOTIFICATION_EVENTS_HISTORY_INDEX);
+    await transaction.execAsync(CREATE_NOTIFICATION_EVENTS_UNREAD_INDEX);
 
     const localProfileColumns = await transaction.getAllAsync<{ name: string }>(
       `PRAGMA table_info(local_profiles);`,
@@ -308,6 +315,7 @@ async function initializeDatabaseTables(): Promise<void> {
     await transaction.execAsync(CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX);
     await transaction.execAsync(CREATE_INVENTORY_EVENTS_HISTORY_INDEX);
     await transaction.execAsync(CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX);
+    await transaction.execAsync(CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX);
     await transaction.execAsync(CREATE_REFILL_ALERT_STATES_ACCOUNT_INDEX);
     await transaction.execAsync(CREATE_DOSE_INVENTORY_EFFECTS_PROFILE_INDEX);
     await transaction.execAsync(CREATE_REMINDER_OCCURRENCES_PROFILE_INDEX);

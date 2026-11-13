@@ -18,6 +18,7 @@ import { TodayDose } from "@/features/doses/dose.types";
 import { useDoses } from "@/hooks/useDoses";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { ScreenHeader } from "@/components/screen-header";
+import { NotificationBellButton } from "@/notifications/notification-center-ui";
 import { HomeDateCarousel } from "@/components/home-date-carousel";
 import { motion } from "@/components/motion-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
@@ -278,7 +279,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} /><View style={styles.container}>
+    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} rightAccessory={<NotificationBellButton />} /><View style={styles.container}>
       <FlatList
         data={finalizedDoses}
         keyExtractor={(item) => item.id}

@@ -38,16 +38,14 @@ export default function ReportExportScreen() {
   const requestRevision = useRef(0);
   const shareInProgress = useRef(false);
   const pendingShare = useRef<PendingShare | null>(null);
-  const reportRef = useRef(loadedReport);
-  const selectedProfileIdRef = useRef(profileId);
-  const presetRef = useRef(preset);
+  const reportRef = useRef<MedicationAdherenceReport | null>(null);
+  const presetRef = useRef<MedicationReportRangePreset>("30");
   const report = loadedReport?.profileId === profileId && loadedReport.range.preset === preset ? loadedReport : null;
-  reportRef.current = loadedReport;
-  selectedProfileIdRef.current = profileId;
-  presetRef.current = preset;
 
   const load = useCallback((nextPreset = preset) => {
     const request = ++requestRevision.current;
+    presetRef.current = nextPreset;
+    reportRef.current = null;
     if (!profileId) {
       setLoadedReport(null); setError(null); setCanRetryLoad(false); setIsLoading(false);
       return;
@@ -55,6 +53,7 @@ export default function ReportExportScreen() {
     setLoadedReport(null); setIsLoading(true); setError(null); setCanRetryLoad(false);
     void getMedicationAdherenceReport(profileId, nextPreset).then((nextReport) => {
       if (request !== requestRevision.current) return;
+      reportRef.current = nextReport;
       setLoadedReport(nextReport); setIsLoading(false);
     }).catch(() => {
       if (request !== requestRevision.current) return;
@@ -69,6 +68,8 @@ export default function ReportExportScreen() {
 
   const changePreset = (nextPreset: MedicationReportRangePreset) => {
     if (nextPreset === preset) return;
+    presetRef.current = nextPreset;
+    reportRef.current = null;
     setPreset(nextPreset);
   };
 
@@ -98,7 +99,6 @@ export default function ReportExportScreen() {
 
     const isStillCurrent = () => requestRevision.current === request.revision
       && useProfileStore.getState().selectedProfileId === request.profileId
-      && selectedProfileIdRef.current === request.profileId
       && presetRef.current === request.preset
       && reportRef.current === request.report;
 

@@ -75,6 +75,13 @@ export const CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX = `
   WHERE operation_id IS NOT NULL AND event_type = 'refill_addition';
 `;
 
+/** A retry of one manual stock correction must never write a second adjustment. */
+export const CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX = `
+  CREATE UNIQUE INDEX IF NOT EXISTS inventory_events_manual_adjustment_operation_unique
+  ON inventory_events (profile_id, medication_id, operation_id)
+  WHERE operation_id IS NOT NULL AND event_type = 'manual_adjustment';
+`;
+
 /** Durable low-stock episode state. Native notification IDs are derived device state. */
 export const CREATE_REFILL_ALERT_STATES_TABLE = `
   CREATE TABLE IF NOT EXISTS refill_alert_states (
@@ -189,6 +196,41 @@ export const CREATE_APP_SETTINGS_TABLE = `
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+`;
+
+/** Account-scoped, on-device history of notification events observed by the app. */
+export const CREATE_NOTIFICATION_EVENTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS notification_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    event_key TEXT NOT NULL,
+    account_uid TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    profile_display_name TEXT NOT NULL,
+    profile_relationship TEXT NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('medication_reminder', 'low_stock')),
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    medication_id TEXT,
+    schedule_id TEXT,
+    dose_occurrence_id TEXT,
+    scheduled_date TEXT,
+    scheduled_time TEXT,
+    native_notification_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    delivery_sources_json TEXT NOT NULL DEFAULT '[]',
+    read_at TEXT,
+    UNIQUE (account_uid, event_key)
+  );
+`;
+
+export const CREATE_NOTIFICATION_EVENTS_HISTORY_INDEX = `
+  CREATE INDEX IF NOT EXISTS notification_events_by_account_time
+  ON notification_events (account_uid, observed_at DESC, id DESC);
+`;
+
+export const CREATE_NOTIFICATION_EVENTS_UNREAD_INDEX = `
+  CREATE INDEX IF NOT EXISTS notification_events_unread_by_account
+  ON notification_events (account_uid, read_at);
 `;
 
 export const CREATE_LOCAL_PROFILES_TABLE = `

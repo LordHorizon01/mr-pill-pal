@@ -6,6 +6,7 @@ import {
   ThemeProvider as NavigationThemeProvider,
 } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Network from "expo-network";
 import { SymbolView } from "expo-symbols";
 import {
   AppState,
@@ -28,6 +29,7 @@ import {
 } from "@/database/database";
 import { BrandedStartupSplash, FirstRunExperience } from "@/components/first-run-experience";
 import { AppDrawerProvider } from "@/components/app-drawer";
+import { NotificationCenterProvider } from "@/notifications/notification-center-provider";
 import { AppColorTokens } from "@/components/ui-tokens";
 import { motion } from "@/components/motion-tokens";
 import { AppThemeProvider, useAppTheme, useAppThemeColorStyle } from "@/components/app-theme-provider";
@@ -42,8 +44,10 @@ import { reconcileLowStockAlertsForAccount } from "@/features/refills/low-stock-
 import { useAuthStore } from "@/state/auth.store";
 import { useProfileStore } from "@/state/profile.store";
 import { AuthGate } from "@/components/auth-gate";
-import { getAccountProfileSetupProgress } from "@/features/auth/auth.service";
+import { getAccountProfileSetupProgress, getCachedAccountProfileSetupProgress } from "@/features/auth/auth.service";
+import { canOpenAuthenticatedLocalApp, isCurrentAccountRequest, isNetworkUnreachable, isOfflineStartupFailure } from "@/features/auth/offline-startup.domain";
 import { useSettingsStore } from "@/state/settings.store";
+import { useOfflineStatusStore } from "@/state/offline-status.store";
 import { FirstRunPreferences } from "@/features/first-run/first-run.domain";
 import { loadFirstRunPreferences, resetFirstRunPreferencesForDevelopment } from "@/features/first-run/first-run.repository";
 
@@ -52,16 +56,20 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const authPhase = useAuthStore((state) => state.phase);
   const authUser = useAuthStore((state) => state.user);
+  const authUserUid = authUser?.uid ?? null;
+  const isVerificationRequired = authPhase === "verification_required";
   const startAuth = useAuthStore((state) => state.start);
   const setProfileReady = useAuthStore((state) => state.setProfileReady);
+  const setOffline = useOfflineStatusStore((state) => state.setOffline);
   const loadSettings = useSettingsStore((state) => state.loadSettings);
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
   const selectedAccountUid = useProfileStore((state) => state.accountUid);
   const [startupAttempt, setStartupAttempt] = useState(0);
+  const [profileRestoreAttempt, setProfileRestoreAttempt] = useState(0);
   const [isDatabaseReady, setIsDatabaseReady] = useState(false);
-  const [isStartupReminderHealthReady, setIsStartupReminderHealthReady] =
-    useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
+  const [profileRestoreError, setProfileRestoreError] = useState<string | null>(null);
+  const [restoredAccountUid, setRestoredAccountUid] = useState<string | null>(null);
   const [reminderMessage, setReminderMessage] = useState<string | null>(null);
   const [firstRunPreferences, setFirstRunPreferences] = useState<FirstRunPreferences | null>(null);
   const [areSettingsReady, setAreSettingsReady] = useState(false);
@@ -76,7 +84,7 @@ export default function RootLayout() {
       try {
         setDatabaseError(null);
         setIsDatabaseReady(false);
-        setIsStartupReminderHealthReady(false);
+        setRestoredAccountUid(null);
         await initializeDatabase();
 
         if (isCurrent) {
@@ -128,16 +136,93 @@ export default function RootLayout() {
   }, [authPhase, isDatabaseReady]);
 
   useEffect(() => {
-    if (!isDatabaseReady || !authUser || authPhase === "verification_required") return;
+    if (!isDatabaseReady || !authUserUid || isVerificationRequired) return;
+    const accountUid = authUserUid;
     let current = true;
-    void useProfileStore.getState().loadForAccount(authUser.uid).then(async (hasProfile) => {
-      const progress = await getAccountProfileSetupProgress(authUser.uid, hasProfile);
-      if (current) setProfileReady(progress.state === "COMPLETED");
-    }).catch(() => {
-      if (current) setProfileReady(false);
+    let refreshInFlight = false;
+    let refreshRequested = false;
+    let connectivitySubscription: ReturnType<typeof AppState.addEventListener> | null = null;
+    let networkSubscription: { remove: () => void } | null = null;
+    const networkState = { offline: null as boolean | null };
+
+    async function refreshAccountDataInBackground(hasProfile: boolean) {
+      if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+      if (refreshInFlight) {
+        refreshRequested = !Boolean(networkState.offline);
+        return;
+      }
+      if (Boolean(networkState.offline)) {
+        setOffline(true);
+        return;
+      }
+      refreshInFlight = true;
+      refreshRequested = false;
+      const results = await Promise.allSettled([
+        useProfileStore.getState().refreshForAccount(accountUid),
+        getAccountProfileSetupProgress(accountUid, hasProfile),
+      ]);
+      refreshInFlight = false;
+      if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+      const [, setupResult] = results;
+      if (setupResult.status === "fulfilled" && setupResult.value.state === "COMPLETED") {
+        setProfileReady(true);
+      }
+      const offline = Boolean(networkState.offline) || results.some(
+        (result) => result.status === "rejected" && isOfflineStartupFailure(result.reason),
+      );
+      setOffline(offline);
+      if (refreshRequested && !Boolean(networkState.offline)) {
+        refreshRequested = false;
+        void refreshAccountDataInBackground(hasProfile);
+      }
+    }
+
+    async function restoreLocalAccount() {
+      try {
+        const profiles = useProfileStore.getState();
+        const hasProfile = await profiles.loadForAccount(accountUid);
+        if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+        const storeError = useProfileStore.getState().error;
+        if (storeError) throw new Error(storeError);
+
+        const progress = await getCachedAccountProfileSetupProgress(accountUid, hasProfile);
+        if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+        setProfileReady(progress.state === "COMPLETED");
+        setRestoredAccountUid(accountUid);
+
+        // Remote profile and account metadata refreshes are deliberately
+        // background-only. SQLite and the cached setup gate already made the
+        // signed-in account usable before either request starts.
+        void refreshAccountDataInBackground(hasProfile);
+        connectivitySubscription = AppState.addEventListener("change", (state) => {
+          if (state === "active") void refreshAccountDataInBackground(hasProfile);
+        });
+        function applyNetworkState(state: { isConnected?: boolean; isInternetReachable?: boolean | null }) {
+          if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+          const unreachable = isNetworkUnreachable(state);
+          if (unreachable === null) return;
+          networkState.offline = unreachable;
+          setOffline(unreachable);
+          if (unreachable) refreshRequested = false;
+          if (!unreachable) void refreshAccountDataInBackground(hasProfile);
+        }
+        networkSubscription = Network.addNetworkStateListener(applyNetworkState);
+        void Network.getNetworkStateAsync().then(applyNetworkState).catch(() => undefined);
+      } catch {
+        if (!current || !isCurrentAccountRequest(accountUid, useAuthStore.getState().user?.uid ?? null)) return;
+        setProfileRestoreError("We couldn't restore the saved local profiles. Your medication data has not been changed. Try again.");
+      }
+    }
+
+    void Promise.resolve().then(() => {
+      if (current) {
+        setProfileRestoreError(null);
+        setOffline(false);
+      }
+      return restoreLocalAccount();
     });
-    return () => { current = false; };
-  }, [authUser?.uid, authPhase === "verification_required", isDatabaseReady, setProfileReady]);
+    return () => { current = false; connectivitySubscription?.remove(); networkSubscription?.remove(); };
+  }, [authUserUid, isVerificationRequired, isDatabaseReady, profileRestoreAttempt, setOffline, setProfileReady]);
 
   useEffect(() => {
     if (!isDatabaseReady || authPhase !== "authenticated" || !selectedProfileId || !selectedAccountUid) {
@@ -170,7 +255,7 @@ export default function RootLayout() {
       return null;
     }
 
-    async function checkReminderHealth(isStartupCheck = false) {
+    async function checkReminderHealth() {
       const checkKey = `${accountUid}:${profileId}`;
       if (activeReminderHealthKey.current === checkKey) {
         return;
@@ -205,14 +290,13 @@ export default function RootLayout() {
           activeReminderHealthKey.current = null;
         }
 
-        if (isStartupCheck && isCurrent) {
-          setIsStartupReminderHealthReady(true);
-        }
       }
-      void reconcileLowStockAlertsForAccount(accountUid);
     }
 
-    void checkReminderHealth(true);
+    // Notification reconciliation is best-effort and never part of the
+    // authenticated navigation readiness condition.
+    void checkReminderHealth();
+    void reconcileLowStockAlertsForAccount(accountUid);
 
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
@@ -228,9 +312,16 @@ export default function RootLayout() {
 
   const isFirstRun = authPhase === "unauthenticated" && firstRunPreferences !== null &&
     (!firstRunPreferences.onboardingComplete || !firstRunPreferences.notificationPrimerHandled);
-  const startupReady = databaseError !== null || (
-    isDatabaseReady && authPhase !== "loading" && areSettingsReady && firstRunPreferences !== null &&
-    (authPhase !== "authenticated" || isStartupReminderHealthReady)
+  const authenticatedLocalReady = Boolean(authUser && canOpenAuthenticatedLocalApp({
+    databaseReady: isDatabaseReady,
+    authRestored: authPhase === "authenticated",
+    localAccountRestored: restoredAccountUid === authUser.uid,
+    setupState: authPhase === "authenticated" ? "COMPLETED" : "IN_PROGRESS",
+  }));
+  const accountRestoreReady = !authUser || authPhase === "verification_required" ||
+    (restoredAccountUid === authUser.uid && (authPhase !== "authenticated" || authenticatedLocalReady));
+  const startupReady = databaseError !== null || profileRestoreError !== null || (
+    isDatabaseReady && authPhase !== "loading" && areSettingsReady && firstRunPreferences !== null && accountRestoreReady
   );
 
   async function replayFirstRunForDevelopment() {
@@ -245,6 +336,9 @@ export default function RootLayout() {
   if (databaseError) {
     destinationKind = "error";
     destination = <ThemedStartupError message={databaseError} onRetry={() => { setStartupHandoffComplete(false); setStartupAttempt((attempt) => attempt + 1); }} />;
+  } else if (profileRestoreError) {
+    destinationKind = "error";
+    destination = <ThemedStartupError message={profileRestoreError} onRetry={() => { setProfileRestoreError(null); setRestoredAccountUid(null); setStartupHandoffComplete(false); setProfileRestoreAttempt((attempt) => attempt + 1); }} />;
   } else if (startupReady && isFirstRun) {
     destinationKind = "first-run";
     destination = <FirstRunExperience
@@ -256,7 +350,7 @@ export default function RootLayout() {
     destination = <ThemedAuthGate onReplayFirstRun={replayFirstRunForDevelopment} />;
   } else if (startupReady) {
     destinationKind = "app";
-    destination = <ThemedApp reminderMessage={reminderMessage} onDismissReminder={() => setReminderMessage(null)} />;
+    destination = <ThemedApp accountUid={authUser?.uid ?? ""} reminderMessage={reminderMessage} onDismissReminder={() => setReminderMessage(null)} />;
   }
   return <SafeAreaProvider><AppThemeProvider><View style={{ flex: 1 }}>
     {destination ? <DestinationTransition key={destinationKind} kind={destinationKind} authHandoff={destinationKind === "auth"}>{destination}</DestinationTransition> : null}
@@ -299,7 +393,7 @@ function ThemedStartupError({ message, onRetry }: { message: string; onRetry: ()
   return <View style={themedStyles.errorContainer}><Text style={themedStyles.errorTitle}>Mr. Pill Pal could not open</Text><Text style={themedStyles.errorText}>{message}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={themedStyles.retryButton}><Text style={themedStyles.retryButtonText}>Try again</Text></Pressable></View>;
 }
 
-function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: string | null; onDismissReminder: () => void }) {
+function ThemedApp({ accountUid, reminderMessage, onDismissReminder }: { accountUid: string; reminderMessage: string | null; onDismissReminder: () => void }) {
   const { mode, colors } = useAppTheme();
   const themedStyles = createStyles(colors);
   const navigationTheme = mode === "dark" ? DarkTheme : DefaultTheme;
@@ -307,6 +401,7 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
   return <NavigationThemeProvider value={themedNavigation}>
     <StatusBar style={mode === "dark" ? "light" : "dark"} />
     {reminderMessage ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss reminder status message" onPress={onDismissReminder} style={[themedStyles.reminderBanner, { backgroundColor: colors.badgeSkippedBackground }]}><Text style={[themedStyles.reminderBannerText, { color: colors.badgeSkippedForeground }]}>{reminderMessage}</Text><Text style={[themedStyles.reminderBannerHint, { color: colors.textSecondary }]}>Tap to dismiss</Text></Pressable> : null}
+    <NotificationCenterProvider accountUid={accountUid} bannerTopInset={reminderMessage ? 78 : 0}>
     <AppDrawerProvider><Stack screenOptions={{ animation: "fade_from_bottom", animationDuration: motion.duration.navigation, headerStyle: { backgroundColor: "transparent" }, headerBackground: () => <StackHeaderBackground />, headerTintColor: colors.primary, headerTitle: ({ children }) => <StackHeaderTitle>{children}</StackHeaderTitle>, headerShadowVisible: true }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
@@ -332,6 +427,7 @@ function ThemedApp({ reminderMessage, onDismissReminder }: { reminderMessage: st
       }} />
       <Stack.Screen name="profiles" options={{ headerShown: false }} />
     </Stack></AppDrawerProvider>
+    </NotificationCenterProvider>
   </NavigationThemeProvider>;
 }
 

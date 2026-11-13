@@ -7,6 +7,7 @@ import {
   CREATE_DOSE_RECORDS_TABLE,
   CREATE_INVENTORY_DOSE_CONSUMPTION_UNIQUE_INDEX,
   CREATE_INVENTORY_EVENTS_HISTORY_INDEX,
+  CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX,
   CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX,
   CREATE_INVENTORY_EVENTS_TABLE,
   CREATE_REFILL_ALERT_STATES_TABLE,
@@ -54,6 +55,8 @@ test("inventory event schema supports profile-isolated newest-first history and 
   assert.match(CREATE_INVENTORY_EVENTS_HISTORY_INDEX, /profile_id, medication_id, created_at DESC/i);
   assert.match(CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX, /profile_id, medication_id, operation_id/i);
   assert.match(CREATE_INVENTORY_REFILL_OPERATION_UNIQUE_INDEX, /event_type = 'refill_addition'/i);
+  assert.match(CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX, /profile_id, medication_id, operation_id/i);
+  assert.match(CREATE_INVENTORY_MANUAL_ADJUSTMENT_OPERATION_UNIQUE_INDEX, /event_type = 'manual_adjustment'/i);
 });
 
 test("low-stock alert state is profile-scoped, durable, and unique per medication episode", () => {

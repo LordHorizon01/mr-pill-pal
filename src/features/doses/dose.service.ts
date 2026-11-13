@@ -16,7 +16,6 @@ import { DoseStatusCorrectionTarget } from "./dose-status-correction.domain";
 import { CreateDoseOccurrenceInput, TodayDose } from "./dose.types";
 import {
   DOSE_EXPIRY_MINUTES,
-  addDaysToLocalDate,
   assertDoseCanBeRecordedOnLocalDate,
   evaluatePendingDoseStatus,
   scheduleOccursOnLocalDate,

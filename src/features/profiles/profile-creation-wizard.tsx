@@ -7,7 +7,8 @@ import { ProfileAvatarPicker } from "@/components/profile-avatar-picker";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { getButtonColorRoles, ui } from "@/components/ui-tokens";
 import { AdditionalProfileDraft, AdditionalProfileStep, buildAdditionalProfileInput, createBlankAdditionalProfileDraft } from "@/features/profiles/profile-creation.domain";
-import { nextTemporaryProfileName, toggleOptionalProfileChoice } from "@/features/profiles/profile-setup.domain";
+import { formatDateOfBirthForDisplay } from "@/features/profiles/profile.domain";
+import { DOB_MIN_YEAR, nextTemporaryProfileName, toggleOptionalProfileChoice } from "@/features/profiles/profile-setup.domain";
 import { CreateProfileInput, ProfileAnswerField, ProfileGender, ProfileRelationshipKind, ProfileReminderPreference } from "@/features/profiles/profile.types";
 
 type Props = {
@@ -160,7 +161,7 @@ export function ProfileCreationWizard({ existingNames, onCancel, onSave }: Props
     }
   }
 
-  const dateValue = draft.dateOfBirth ? new Date(`${draft.dateOfBirth}T12:00:00`) : new Date(2000, 0, 1, 12);
+  const dateValue = draft.dateOfBirth ? new Date(`${draft.dateOfBirth}T12:00:00`) : new Date();
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -199,10 +200,10 @@ export function ProfileCreationWizard({ existingNames, onCancel, onSave }: Props
                 onPress={() => setShowDatePicker(true)}
                 style={styles.dateButton}
               >
-                <Text style={[styles.dateText, !draft.dateOfBirth && styles.placeholder]}>{draft.dateOfBirth || "YYYY-MM-DD"}</Text>
+                <Text style={[styles.dateText, !draft.dateOfBirth && styles.placeholder]}>{draft.dateOfBirth ? formatDateOfBirthForDisplay(draft.dateOfBirth) : "DD-MM-YYYY"}</Text>
                 <Text style={styles.dateAction}>Choose date</Text>
               </Pressable>
-              {showDatePicker ? <DateTimePicker value={dateValue} mode="date" maximumDate={new Date()} onValueChange={(_event: DateTimePickerChangeEvent, value?: Date) => {
+              {showDatePicker ? <DateTimePicker value={dateValue} mode="date" minimumDate={new Date(DOB_MIN_YEAR, 0, 1)} maximumDate={new Date()} onValueChange={(_event: DateTimePickerChangeEvent, value?: Date) => {
                 if (value) setDraft((current) => ({ ...current, dateOfBirth: `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`, answerStates: { ...current.answerStates, dateOfBirth: "answered" } }));
                 setShowDatePicker(false);
               }} onDismiss={() => setShowDatePicker(false)} /> : null}
@@ -212,6 +213,7 @@ export function ProfileCreationWizard({ existingNames, onCancel, onSave }: Props
               disabled={busy}
               onChange={(avatarUrl) => setDraft((current) => ({ ...current, avatarUrl, answerStates: { ...current.answerStates, avatar: avatarUrl ? "answered" : "unanswered" } }))}
               onChoosePhoto={() => void choosePhoto()}
+              onEditPhoto={() => void choosePhoto()}
             /> : null}
             {step === "profileType" ? <ChoiceGrid
               selected={draft.profileType}
@@ -315,7 +317,7 @@ function ReviewList({ draft, fallbackName, colors }: { draft: AdditionalProfileD
     <ReviewRow label="Full name" value={draft.fullName.trim() || `${line("fullName", "")} - app label ${fallbackName}`} colors={colors} />
     <ReviewRow label="Nickname" value={line("nickname", draft.nickname.trim())} colors={colors} />
     <ReviewRow label="Gender" value={line("gender", genderLabel)} colors={colors} />
-    <ReviewRow label="Date of birth" value={line("dateOfBirth", draft.dateOfBirth)} colors={colors} />
+    <ReviewRow label="Date of birth" value={line("dateOfBirth", formatDateOfBirthForDisplay(draft.dateOfBirth))} colors={colors} />
     <ReviewRow label="Profile photo" value={line("avatar", photoLabel)} colors={colors} />
     <ReviewRow label="Profile type" value={line("profileType", profileTypeLabel)} colors={colors} />
     <ReviewRow label="Relationship" value={relation} colors={colors} />

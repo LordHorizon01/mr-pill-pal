@@ -1,7 +1,7 @@
 import { runDatabaseOperation, runExclusiveDatabaseTransaction } from "@/database/database";
 
-import { assertRefillTrackingEnabled, calculateRefillAddition, isStockUnit } from "./refill.domain";
-import { InventoryEventType, MedicationInventory, RecordRefillInput, RecordRefillResult, RefillTrackingInput, StockHistoryEvent } from "./refill.types";
+import { assertRefillTrackingEnabled, calculateRefillAddition, calculateStockCorrection, isStockUnit, validateCorrectStockInput } from "./refill.domain";
+import { CorrectStockInput, CorrectStockResult, InventoryEventType, MedicationInventory, RecordRefillInput, RecordRefillResult, RefillTrackingInput, StockHistoryEvent } from "./refill.types";
 
 type InventoryRow = {
   medication_id: string;
@@ -187,6 +187,73 @@ export async function recordMedicationRefill(
     );
     if (!saved) throw new Error("Refill stock could not be saved.");
     return { inventory: mapInventory(saved), event, wasAlreadyRecorded: false };
+  });
+}
+
+export async function correctMedicationStock(
+  profileId: string,
+  medicationId: string,
+  input: CorrectStockInput,
+): Promise<CorrectStockResult> {
+  requireProfile(profileId);
+  const validInput = validateCorrectStockInput(input);
+  return runExclusiveDatabaseTransaction(async (db) => {
+    const inventory = await db.getFirstAsync<InventoryRow>(
+      `SELECT inventory.*
+       FROM medication_inventory AS inventory
+       INNER JOIN medications AS medication ON medication.id = inventory.medication_id
+       WHERE inventory.profile_id = ? AND inventory.medication_id = ? AND medication.profile_id = ?`,
+      [profileId, medicationId, profileId],
+    );
+    if (!inventory) throw new Error("Refill tracking was not found for this medication.");
+
+    const previousEvent = await db.getFirstAsync<InventoryEventRow>(
+      `SELECT * FROM inventory_events
+       WHERE profile_id = ? AND medication_id = ? AND operation_id = ? AND event_type = 'manual_adjustment'`,
+      [profileId, medicationId, validInput.operationId],
+    );
+    if (previousEvent) {
+      return { inventory: mapInventory(inventory), event: mapStockHistoryEvent(previousEvent), wasAlreadyRecorded: true, wasChanged: true };
+    }
+
+    const calculation = calculateStockCorrection(inventory.current_quantity, validInput.quantity);
+    if (!calculation) {
+      return { inventory: mapInventory(inventory), wasAlreadyRecorded: false, wasChanged: false };
+    }
+
+    const now = new Date().toISOString();
+    const event: StockHistoryEvent = {
+      id: newId(),
+      profileId,
+      medicationId,
+      operationId: validInput.operationId,
+      type: "manual_adjustment",
+      quantityDelta: calculation.quantityDelta,
+      quantityBefore: calculation.quantityBefore,
+      quantityAfter: calculation.quantityAfter,
+      unitSnapshot: inventory.unit,
+      createdAt: now,
+    };
+
+    await db.runAsync(
+      `INSERT INTO inventory_events (id, profile_id, medication_id, operation_id, event_type, quantity_delta, quantity_before, quantity_after, unit_snapshot, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [event.id, profileId, medicationId, validInput.operationId, event.type, event.quantityDelta, event.quantityBefore, event.quantityAfter, event.unitSnapshot ?? null, now],
+    );
+    const update = await db.runAsync(
+      `UPDATE medication_inventory
+       SET current_quantity = ?, updated_at = ?
+       WHERE medication_id = ? AND profile_id = ? AND current_quantity = ?`,
+      [calculation.quantityAfter, now, medicationId, profileId, calculation.quantityBefore],
+    );
+    if (update.changes !== 1) throw new Error("Stock changed before this correction could be saved. Refresh and try again.");
+
+    const saved = await db.getFirstAsync<InventoryRow>(
+      "SELECT * FROM medication_inventory WHERE medication_id = ? AND profile_id = ?",
+      [medicationId, profileId],
+    );
+    if (!saved) throw new Error("Corrected stock could not be saved.");
+    return { inventory: mapInventory(saved), event, wasAlreadyRecorded: false, wasChanged: true };
   });
 }
 

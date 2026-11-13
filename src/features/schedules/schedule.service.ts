@@ -28,7 +28,7 @@ import {
   scheduleOneTimeMedicationReminder,
 } from "@/notifications/notification.service";
 import { getExpectedReminderDates } from "./reminder-occurrence.domain";
-import { getDoseOccurrenceReminderStatus, hasScheduledReminderOccurrences, markScheduleOccurrencesCancelled, saveReminderOccurrence } from "./reminder-occurrence.repository";
+import { getDoseOccurrenceReminderStatus, getReminderOccurrenceNotificationIdsForAccount, getReminderOccurrencesForSchedule, hasScheduledReminderOccurrences, markScheduleOccurrencesCancelled, saveReminderOccurrence } from "./reminder-occurrence.repository";
 
 import {
   CreateScheduleInput,
@@ -165,6 +165,14 @@ function getStoredNotificationIds(schedule: MedicationSchedule): string[] {
   return [];
 }
 
+async function getAllStoredNotificationIds(schedule: MedicationSchedule): Promise<string[]> {
+  const occurrences = await getReminderOccurrencesForSchedule(schedule.profileId, schedule.id);
+  return [...new Set([
+    ...getStoredNotificationIds(schedule),
+    ...occurrences.flatMap((occurrence) => occurrence.nativeNotificationId ? [occurrence.nativeNotificationId] : []),
+  ])];
+}
+
 async function scheduleNativeNotifications(
   medicationName: string,
   schedule: MedicationSchedule,
@@ -208,6 +216,10 @@ function isPastOneTimeSchedule(schedule: MedicationSchedule): boolean {
   return getOneTimeReminderDate(schedule.startDate, schedule.time).getTime() <= Date.now();
 }
 
+function isFutureReminderOccurrence(date: string, time: string): boolean {
+  return getOneTimeReminderDate(date, time).getTime() > Date.now();
+}
+
 async function cancelNotificationsSilently(notificationIds: string[]): Promise<void> {
   try {
     await cancelScheduledNotifications(notificationIds);
@@ -220,7 +232,7 @@ async function setInactiveScheduleState(
   schedule: MedicationSchedule,
   reminderStatus: Exclude<ReminderStatus, "active">,
 ): Promise<void> {
-  const notificationIds = getStoredNotificationIds(schedule);
+  const notificationIds = await getAllStoredNotificationIds(schedule);
 
   if (notificationIds.length > 0) {
     await cancelScheduledNotifications(notificationIds);
@@ -235,7 +247,7 @@ async function markScheduleAsUnavailable(
   schedule: MedicationSchedule,
   reminderStatus: ReminderFailureStatus,
 ): Promise<void> {
-  await cancelNotificationsSilently(getStoredNotificationIds(schedule));
+  await cancelNotificationsSilently(await getAllStoredNotificationIds(schedule));
   await setScheduleReminderState(schedule.id, reminderStatus);
 }
 
@@ -263,7 +275,7 @@ async function replaceScheduleNotifications(
   hideMedicationName?: boolean,
   effectiveAt?: string,
 ): Promise<string[]> {
-  const oldNotificationIds = getStoredNotificationIds(schedule);
+  const oldNotificationIds = await getAllStoredNotificationIds(schedule);
   const newNotificationIds = await scheduleNativeNotifications(
     medicationName,
     schedule,
@@ -403,14 +415,19 @@ export function reconcileReminderHealth(accountUid?: string): Promise<ReminderHe
 /** Cancels only this signed-in account's native reminders before logout. SQLite schedules stay intact. */
 export async function cancelAccountReminderNotifications(accountUid: string): Promise<void> {
   const schedules = await getSchedulesByAccount(accountUid);
-  const ids = [...new Set<string>(schedules.flatMap((schedule) => getStoredNotificationIds(schedule)))];
+  const occurrenceIds = await getReminderOccurrenceNotificationIdsForAccount(accountUid);
+  const ids = [...new Set<string>([
+    ...schedules.flatMap((schedule) => getStoredNotificationIds(schedule)),
+    ...occurrenceIds,
+  ])];
   if (ids.length > 0) await cancelScheduledNotifications(ids);
 }
 
 /** Used for profile deactivation; it never touches another profile's reminders. */
 export async function cancelProfileReminderNotifications(profileId: string): Promise<void> {
   const schedules = await getActiveSchedulesByProfile(profileId);
-  const ids = [...new Set<string>(schedules.flatMap((schedule) => getStoredNotificationIds(schedule)))];
+  const occurrenceIds = await Promise.all(schedules.map((schedule) => getAllStoredNotificationIds(schedule)));
+  const ids = [...new Set<string>(occurrenceIds.flat())];
   if (ids.length > 0) await cancelScheduledNotifications(ids);
 }
 
@@ -464,13 +481,21 @@ async function reconcileReminderHealthInternal(accountUid?: string): Promise<Rem
 
   for (const schedule of futureActiveSchedules) {
     const storedNotificationIds = getStoredNotificationIds(schedule);
+    const occurrences = await getReminderOccurrencesForSchedule(schedule.profileId, schedule.id);
+    const hasMissingFutureOccurrence = occurrences.some((occurrence) => {
+      if (!isFutureReminderOccurrence(occurrence.scheduledDate, occurrence.scheduledTime)) return false;
+      if (occurrence.status === "cleanup_failed") return true;
+      return occurrence.status === "scheduled" && (
+        !occurrence.nativeNotificationId || !nativeNotificationIds.has(occurrence.nativeNotificationId)
+      );
+    });
     const isHealthy = isReminderRegistrationHealthy(
       schedule.reminderStatus,
       storedNotificationIds,
       nativeNotificationIds,
     );
 
-    if (isHealthy && await hasScheduledReminderOccurrences(schedule.profileId, schedule.id)) {
+    if (!hasMissingFutureOccurrence && isHealthy && await hasScheduledReminderOccurrences(schedule.profileId, schedule.id)) {
       continue;
     }
 
@@ -761,7 +786,7 @@ export async function updateMedicationSchedule(
       throw new Error("This medication already has the same reminder schedule.");
     }
 
-    const oldNotificationIds = getStoredNotificationIds(schedule);
+    const oldNotificationIds = await getAllStoredNotificationIds(schedule);
     const persistedStatus = getScheduleEditStatusAfterPersist(schedule);
     const updatedSchedule = await updateScheduleDetails(
       id,
@@ -782,6 +807,7 @@ export async function updateMedicationSchedule(
 
 
     await deletePendingDosesForScheduleFromLocalDateTime(id, toLocalDateString(), toLocalTimeString());
+    await markScheduleOccurrencesCancelled(id);
 
     if (persistedStatus === "paused") {
       return updatedSchedule;
@@ -903,7 +929,7 @@ export async function removeSchedule(id: string): Promise<void> {
     throw new Error("Schedule not found.");
   }
 
-  const notificationIds = getStoredNotificationIds(schedule);
+  const notificationIds = await getAllStoredNotificationIds(schedule);
 
   if (notificationIds.length > 0) {
     await cancelScheduledNotifications(notificationIds);

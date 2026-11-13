@@ -50,7 +50,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       if (user) {
         const { cancelAccountReminderNotifications } = await import("@/features/schedules/schedule.service");
+        const { cancelLowStockAlertsForAccount } = await import("@/features/refills/low-stock-alert.service");
         await cancelAccountReminderNotifications(user.uid);
+        await cancelLowStockAlertsForAccount(user.uid);
       }
       await signOutCurrentAccount();
       const { useProfileStore } = await import("@/state/profile.store");

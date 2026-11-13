@@ -6,6 +6,9 @@ import {
   calculateRefillAddition,
   calculateTakenInventoryConsumption,
   getRefillStockState,
+  calculateStockCorrection,
+  validateCorrectStockInput,
+  validateStockCorrection,
   validateRefillAddition,
   validateRefillTrackingInput,
 } from "../src/features/refills/refill.domain";
@@ -84,4 +87,26 @@ test("refill additions reject blank-equivalent, zero, negative, and non-finite v
 test("disabled refill tracking rejects stock additions before a mutation can start", () => {
   assert.throws(() => assertRefillTrackingEnabled(false), /Enable refill tracking/);
   assert.doesNotThrow(() => assertRefillTrackingEnabled(true));
+});
+
+test("manual stock corrections accept zero and exact three-decimal quantities", () => {
+  assert.equal(validateStockCorrection(0), 0);
+  assert.equal(validateStockCorrection(12.345), 12.345);
+  assert.deepEqual(validateCorrectStockInput({ quantity: 4.25, operationId: "correction-1" }), { quantity: 4.25, operationId: "correction-1" });
+});
+
+test("manual stock corrections reject invalid, negative, excessive, and over-precise quantities", () => {
+  assert.throws(() => validateStockCorrection(Number.NaN), /valid number/);
+  assert.throws(() => validateStockCorrection(Number.POSITIVE_INFINITY), /valid number/);
+  assert.throws(() => validateStockCorrection(-0.001), /zero or more/);
+  assert.throws(() => validateStockCorrection(1_000_001), /or less/);
+  assert.throws(() => validateStockCorrection(1.0001), /three decimal places/);
+  assert.throws(() => validateCorrectStockInput({ quantity: 1, operationId: "  " }), /operation ID/);
+});
+
+test("manual stock correction calculates signed audit deltas and leaves no-op quantities unchanged", () => {
+  assert.deepEqual(calculateStockCorrection(8, 5.5), { quantityBefore: 8, quantityDelta: -2.5, quantityAfter: 5.5 });
+  assert.deepEqual(calculateStockCorrection(5.5, 8), { quantityBefore: 5.5, quantityDelta: 2.5, quantityAfter: 8 });
+  assert.equal(calculateStockCorrection(0, 0), null);
+  assert.equal(calculateStockCorrection(5, 5), null);
 });

@@ -17,17 +17,30 @@ type Props = {
   value: string | null;
   onChange: (value: string | null) => void;
   onChoosePhoto: () => void;
+  onEditPhoto?: () => void;
   disabled?: boolean;
   title?: string;
 };
 
-export function ProfileAvatarPicker({ value, onChange, onChoosePhoto, disabled = false, title = "Profile photo" }: Props) {
+export function ProfileAvatarPicker({ value, onChange, onChoosePhoto, onEditPhoto, disabled = false, title = "Profile photo" }: Props) {
   const { colors } = useAppTheme();
+  const hasDevicePhoto = isDevicePhotoUri(value);
   return (
     <View style={styles.root}>
       <Text accessibilityRole="header" style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
       <View style={styles.previewRow}>
-        <ProfileAvatar profile={value ? { avatarUrl: value } : null} size={72} />
+        <View style={styles.previewAvatar}>
+          <ProfileAvatar profile={value ? { avatarUrl: value } : null} size={72} />
+          {hasDevicePhoto ? <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Edit selected profile photo crop"
+            accessibilityHint="Opens the device photo crop tool. Choose the same photo to adjust its crop."
+            accessibilityState={{ disabled }}
+            disabled={disabled}
+            onPress={onEditPhoto ?? onChoosePhoto}
+            style={[styles.editPhotoButton, { backgroundColor: colors.surface, borderColor: colors.borderStrong }]}
+          ><Text style={[styles.editPhotoGlyph, { color: colors.textPrimary }]}>✎</Text></Pressable> : null}
+        </View>
         <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>
           {value ? "Selected avatar preview" : "No avatar selected; neutral is shown as a preview"}
         </Text>
@@ -84,10 +97,17 @@ export function ProfileAvatarPicker({ value, onChange, onChoosePhoto, disabled =
   );
 }
 
+function isDevicePhotoUri(value: string | null): boolean {
+  return Boolean(value && /^(file|content|ph|assets-library):\/\//i.test(value));
+}
+
 const styles = StyleSheet.create({
   root: { gap: 8 },
   title: { fontSize: 14, lineHeight: 19, fontWeight: "700" },
-  previewRow: { minHeight: 76, flexDirection: "row", alignItems: "center", gap: 12 },
+  previewRow: { minHeight: 84, flexDirection: "row", alignItems: "center", gap: 12 },
+  previewAvatar: { width: 72, height: 84, alignItems: "center", justifyContent: "flex-start", position: "relative" },
+  editPhotoButton: { position: "absolute", right: -8, bottom: -2, minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", borderWidth: 1, borderRadius: 22, elevation: 2 },
+  editPhotoGlyph: { fontSize: 16, lineHeight: 20, fontWeight: "800" },
   previewLabel: { flex: 1, fontSize: 13, lineHeight: 18 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "flex-start" },
   choice: { width: 66, minHeight: 78, alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 12, paddingVertical: 4, paddingHorizontal: 2 },

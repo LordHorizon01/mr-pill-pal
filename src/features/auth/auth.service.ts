@@ -10,6 +10,8 @@ import {
   buildAccountDocumentDraft,
 } from "@/features/profiles/profile-setup.domain";
 import { ProfileAnswerField, ProfileAnswerStatus } from "@/features/profiles/profile.types";
+import { getCachedAccountProfileSetupProgress as readCachedSetupProgress, saveCachedAccountProfileSetupProgress } from "./auth-session.repository";
+import { resolveLocalProfileSetupState, withStartupTimeout } from "./offline-startup.domain";
 
 export type AuthUser = auth.User;
 export type GoogleSignInResult = { cancelled: boolean };
@@ -98,6 +100,7 @@ export async function markAccountProfileSetupComplete(accountUid: string): Promi
     profileSetupState: "COMPLETED",
     updatedAt: firestore.serverTimestamp(),
   });
+  await persistCachedSetupProgress(accountUid, { state: "COMPLETED", draft: sanitizeProfileSetupDraft(undefined) });
 }
 
 type FirestoreAccount = {
@@ -110,6 +113,8 @@ export type AccountProfileSetupProgress = {
   state: AccountProfileSetupState;
   draft: AccountProfileSetupDraft;
 };
+
+type CachedAccountProfileSetupProgress = AccountProfileSetupProgress;
 
 function sanitizeProfileSetupDraft(value: FirestoreAccount["profileSetupDraft"]): AccountProfileSetupDraft {
   const displayName = typeof value?.displayName === "string" && value.displayName.trim() ? value.displayName.trim() : null;
@@ -154,19 +159,81 @@ function sanitizeProfileSetupDraft(value: FirestoreAccount["profileSetupDraft"])
  */
 export async function getAccountProfileSetupProgress(accountUid: string, hasExistingProfile = false): Promise<AccountProfileSetupProgress> {
   const user = getCurrentAuthenticatedUser(accountUid);
-  await ensureAccountDocument(user);
+  const cached = await readCachedSetupProgress(accountUid).then(parseCachedSetupProgress).catch(() => null);
+  if (firebaseAuth().currentUser?.uid !== accountUid) {
+    throw new Error("Your sign-in session changed. Please sign in again.");
+  }
   const reference = firestore.doc(firebaseStore(), "accounts", accountUid);
-  const snapshot = await firestore.getDoc(reference);
-  const account = (snapshot.data() ?? {}) as FirestoreAccount;
-  const state = account.profileSetupState
-    ?? (account.profileSetupComplete || hasExistingProfile ? "COMPLETED" : "NOT_STARTED");
-  const draft = sanitizeProfileSetupDraft(account.profileSetupDraft);
-
-  if (state === "COMPLETED" && (!account.profileSetupComplete || account.profileSetupState !== "COMPLETED")) {
-    await markAccountProfileSetupComplete(accountUid);
+  let account: FirestoreAccount;
+  try {
+    const snapshot = await withStartupTimeout(firestore.getDoc(reference), "Account setup refresh");
+    if (!snapshot.exists()) await withStartupTimeout(ensureAccountDocument(user), "Account setup initialization");
+    account = (snapshot.data() ?? {}) as FirestoreAccount;
+  } catch (error) {
+    if (firebaseAuth().currentUser?.uid !== accountUid) {
+      throw new Error("Your sign-in session changed. Please sign in again.");
+    }
+    if (cached || hasExistingProfile) {
+      const state = resolveLocalProfileSetupState(cached?.state ?? null, hasExistingProfile);
+      const progress = { state, draft: cached?.draft ?? sanitizeProfileSetupDraft(undefined) };
+      if (hasExistingProfile && cached?.state !== "COMPLETED") await persistCachedSetupProgress(accountUid, progress);
+      return progress;
+    }
+    throw error;
   }
 
-  return { state, draft };
+  if (firebaseAuth().currentUser?.uid !== accountUid) {
+    throw new Error("Your sign-in session changed. Please sign in again.");
+  }
+
+  const remoteState = account.profileSetupState
+    ?? (account.profileSetupComplete ? "COMPLETED" : "NOT_STARTED");
+  const state = resolveLocalProfileSetupState(cached?.state === "COMPLETED" ? cached.state : remoteState, hasExistingProfile);
+  const progress = { state, draft: sanitizeProfileSetupDraft(account.profileSetupDraft ?? cached?.draft) };
+  await persistCachedSetupProgress(accountUid, progress);
+
+  if (state === "COMPLETED" && (!account.profileSetupComplete || account.profileSetupState !== "COMPLETED")) {
+    // Existing local profiles are the legacy migration proof. Reconcile the
+    // cloud gate after the read without making local access wait for the write.
+    void ensureAccountDocument(user).then(() => markAccountProfileSetupComplete(accountUid)).catch(() => undefined);
+  }
+
+  return progress;
+}
+
+function parseCachedSetupProgress(value: string | null): CachedAccountProfileSetupProgress | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<CachedAccountProfileSetupProgress>;
+    if (parsed.state !== "NOT_STARTED" && parsed.state !== "IN_PROGRESS" && parsed.state !== "COMPLETED") return null;
+    return { state: parsed.state, draft: sanitizeProfileSetupDraft(parsed.draft) };
+  } catch {
+    return null;
+  }
+}
+
+async function persistCachedSetupProgress(accountUid: string, progress: AccountProfileSetupProgress): Promise<void> {
+  if (firebaseAuth().currentUser?.uid !== accountUid) return;
+  try {
+    await saveCachedAccountProfileSetupProgress(accountUid, JSON.stringify(progress));
+  } catch {
+    // Remote confirmation remains usable if local cache persistence fails.
+  }
+}
+
+export async function getCachedAccountProfileSetupProgress(
+  accountUid: string,
+  hasExistingProfile = false,
+): Promise<AccountProfileSetupProgress> {
+  getCurrentAuthenticatedUser(accountUid);
+  const cached = await readCachedSetupProgress(accountUid).then(parseCachedSetupProgress).catch(() => null);
+  if (firebaseAuth().currentUser?.uid !== accountUid) {
+    throw new Error("Your sign-in session changed. Please sign in again.");
+  }
+  const state = resolveLocalProfileSetupState(cached?.state ?? null, hasExistingProfile);
+  const progress = { state, draft: cached?.draft ?? sanitizeProfileSetupDraft(undefined) };
+  if (hasExistingProfile && cached?.state !== "COMPLETED") await persistCachedSetupProgress(accountUid, progress);
+  return progress;
 }
 
 export async function startAccountProfileSetup(accountUid: string): Promise<void> {
@@ -177,6 +244,7 @@ export async function startAccountProfileSetup(accountUid: string): Promise<void
     onboardingComplete: false,
     updatedAt: firestore.serverTimestamp(),
   });
+  await persistCachedSetupProgress(accountUid, { state: "IN_PROGRESS", draft: sanitizeProfileSetupDraft(undefined) });
 }
 
 export async function saveAccountProfileSetupDraft(accountUid: string, draft: AccountProfileSetupDraft): Promise<void> {
@@ -190,6 +258,7 @@ export async function saveAccountProfileSetupDraft(accountUid: string, draft: Ac
     profileSetupDraft: normalizedDraft,
     updatedAt: firestore.serverTimestamp(),
   });
+  await persistCachedSetupProgress(accountUid, { state: "IN_PROGRESS", draft: normalizedDraft });
 }
 
 export function requiresEmailVerification(user: AuthUser): boolean { return Boolean(user.email) && !user.emailVerified && user.providerData.some((provider: auth.UserInfo) => provider.providerId === "password"); }

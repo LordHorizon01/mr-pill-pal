@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { ReminderNotificationMetadata } from "./notification-metadata.types";
 import { getStatusAwareReminderContent } from "./reminder-content.domain";
+import { dispatchLocalNotificationRequest } from "./local-notification-dispatch.domain";
 import { DoseStatus } from "@/features/doses/dose.types";
 
 const MEDICATION_CHANNEL_ID = "medication-reminders-v3";
@@ -58,7 +59,7 @@ export async function hasNotificationPermission(): Promise<boolean> {
 
   const permission = await Notifications.getPermissionsAsync();
 
-  return permission.status === "granted";
+  return permission.granted || permission.status === "granted";
 }
 
 /** Read the OS permission without displaying a prompt or changing reminder scheduling. */
@@ -90,16 +91,10 @@ export async function requestPrimerNotificationPermission(): Promise<PrimerNotif
 
 export async function initializeNotifications(): Promise<boolean> {
   await ensureMedicationNotificationChannel();
-
-  const existingPermission = await Notifications.getPermissionsAsync();
-
-  if (existingPermission.status === "granted") {
-    return true;
-  }
-
-  const requestedPermission = await Notifications.requestPermissionsAsync();
-
-  return requestedPermission.status === "granted";
+  const permission = await Notifications.getPermissionsAsync();
+  // Scheduling and health checks never prompt. The permission prompt is only
+  // requested from an explicit user action in the reminder UI.
+  return permission.granted || permission.status === "granted";
 }
 
 export async function getScheduledNotificationIds(): Promise<string[]> {
@@ -169,7 +164,7 @@ export async function scheduleTestNotification(): Promise<string> {
   }
 
   try {
-    return await Notifications.scheduleNotificationAsync({
+    return await dispatchLocalNotificationRequest(Notifications.scheduleNotificationAsync, {
       content: {
         title: "Mr. Pill Pal",
         body: "Test medication reminder",
@@ -192,7 +187,7 @@ export async function scheduleLowStockNotification(content: { title: string; bod
     throw new NotificationPermissionError();
   }
   try {
-    return await Notifications.scheduleNotificationAsync({
+    return await dispatchLocalNotificationRequest(Notifications.scheduleNotificationAsync, {
       content: { title: content.title, body: content.body, data: { profileId, medicationId, kind: "low_stock" } },
       trigger: null,
     });
@@ -217,7 +212,7 @@ export async function scheduleDailyMedicationReminder(
   const { hour, minute } = parseReminderTime(time);
 
   try {
-    return await Notifications.scheduleNotificationAsync({
+    return await dispatchLocalNotificationRequest(Notifications.scheduleNotificationAsync, {
       content: {
         title: "Medication Reminder",
         body: getMedicationReminderBody(medicationName, hideMedicationName, profileName),
@@ -289,7 +284,7 @@ export async function scheduleOneTimeMedicationReminder(
 
   try {
     const content = getStatusAwareReminderContent({ medicationName, hideMedicationName, profileName, status, statusRecordedAt });
-    return await Notifications.scheduleNotificationAsync({
+    return await dispatchLocalNotificationRequest(Notifications.scheduleNotificationAsync, {
       content: {
         title: content.title,
         body: content.body,
@@ -360,7 +355,7 @@ export async function scheduleWeeklyMedicationReminders(
       const expoWeekday = day + 1;
 
       const notificationId =
-        await Notifications.scheduleNotificationAsync({
+        await dispatchLocalNotificationRequest(Notifications.scheduleNotificationAsync, {
           content: {
             title: "Medication Reminder",
             body: getMedicationReminderBody(
@@ -386,7 +381,7 @@ export async function scheduleWeeklyMedicationReminders(
     }
 
     return notificationIds;
-  } catch (error) {
+  } catch {
     // Prevent partially-created/orphan reminders.
     await Promise.all(
       notificationIds.map((notificationId) =>

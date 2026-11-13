@@ -31,3 +31,25 @@ test("a selected future weekday remains scheduled after today's selected time ha
   assert.equal(dates.includes("2026-09-26"), false);
   assert.equal(dates[0], "2026-09-27");
 });
+
+test("recurring reminders are queued from a future start date beyond the current rolling window", () => {
+  const dates = getExpectedReminderDates(
+    schedule({ startDate: "2026-11-20", repeatDays: [5] }),
+    "2026-10-01",
+    new Date(2026, 9, 1, 8, 0),
+  );
+  assert.equal(dates[0], "2026-11-20");
+  assert.equal(dates.length, 2);
+  assert.equal(dates.every((date) => date >= "2026-11-20"), true);
+});
+
+test("recurring reminders retain a bounded 14-day horizon after their future start", () => {
+  const dates = getExpectedReminderDates(
+    schedule({ startDate: "2027-01-01", repeatDays: [0, 1, 2, 3, 4, 5, 6] }),
+    "2026-10-01",
+    new Date(2026, 9, 1, 8, 0),
+  );
+  assert.equal(dates.length, 14);
+  assert.equal(dates[0], "2027-01-01");
+  assert.equal(dates.at(-1), "2027-01-14");
+});

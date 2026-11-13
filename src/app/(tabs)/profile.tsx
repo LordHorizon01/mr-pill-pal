@@ -8,7 +8,7 @@ import { TabContentTransition } from "@/components/tab-content-transition";
 import { ThemedButton } from "@/components/themed-ui";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { ui } from "@/components/ui-tokens";
-import { getProfileDisplayName } from "@/features/profiles/profile.domain";
+import { formatDateOfBirthForDisplay, getProfileDisplayName } from "@/features/profiles/profile.domain";
 import { toLocalDateString } from "@/features/doses/dose.service";
 import { useDoseStore } from "@/state/dose.store";
 import { useMedicationStore } from "@/state/medication.store";
@@ -61,7 +61,7 @@ export default function ProfileHubScreen() {
           <Text accessibilityRole="header" style={styles.sectionTitle}>Personal details</Text>
           <DetailRow label="Name" value={getProfileDisplayName(profile)} />
           <DetailRow label="Relationship" value={profile.relationship} />
-          {profile.dateOfBirth ? <DetailRow label="Date of birth" value={formatDate(profile.dateOfBirth)} /> : null}
+          {profile.dateOfBirth ? <DetailRow label="Date of birth" value={formatDateOfBirthForDisplay(profile.dateOfBirth)} /> : null}
         </View>
 
         <View style={styles.section}>
@@ -92,11 +92,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <Text style={styles.detailLabel}>{label}</Text>
     <Text selectable style={styles.detailValue}>{value}</Text>
   </View>;
-}
-
-function formatDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day, 12).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
 const createStyles = (colors: ReturnType<typeof useAppTheme>["colors"]) => StyleSheet.create({

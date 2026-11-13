@@ -15,6 +15,7 @@ export function toAuthMessage(error: AuthScreenError, fallback = "We could not c
   const messages: Record<string, string> = {
     "auth/invalid-email": "Enter a valid email address.",
     "auth/invalid-credential": "The email or password is incorrect.",
+    "offline/startup-timeout": "An internet connection is required to confirm this account setup. Your saved local medicines remain available.",
     "auth/wrong-password": "The email or password is incorrect.",
     "auth/user-not-found": "The email or password is incorrect.",
     "auth/email-already-in-use": "An account already uses this email. Try logging in instead.",

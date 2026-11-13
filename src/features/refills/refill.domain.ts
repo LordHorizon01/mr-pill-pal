@@ -1,5 +1,6 @@
 import {
   MedicationInventory,
+  CorrectStockInput,
   InventoryEventType,
   RecordRefillInput,
   RefillStockState,
@@ -20,6 +21,12 @@ export interface TakenInventoryConsumption {
 export interface RefillAdditionCalculation {
   quantityAdded: number;
   quantityBefore: number;
+  quantityAfter: number;
+}
+
+export interface StockCorrectionCalculation {
+  quantityBefore: number;
+  quantityDelta: number;
   quantityAfter: number;
 }
 
@@ -58,6 +65,31 @@ export function calculateRefillAddition(currentQuantity: number, quantityAdded: 
   const quantityAfter = normalizeQuantity(quantityBefore + normalizedAddition, "New stock", 0);
 
   return { quantityAdded: normalizedAddition, quantityBefore, quantityAfter };
+}
+
+/** Validates a manual correction without silently rounding unsupported precision. */
+export function validateStockCorrection(quantity: number): number {
+  if (!Number.isFinite(quantity)) throw new Error("Corrected stock must be a valid number.");
+  if (quantity < 0) throw new Error("Corrected stock must be zero or more.");
+  if (quantity > MAX_INVENTORY_QUANTITY) throw new Error(`Corrected stock must be ${MAX_INVENTORY_QUANTITY.toLocaleString()} or less.`);
+  const scaled = quantity * INVENTORY_PRECISION;
+  const rounded = Math.round(scaled);
+  if (Math.abs(scaled - rounded) > 1e-7) throw new Error("Corrected stock exceeds the supported precision of three decimal places.");
+  return rounded / INVENTORY_PRECISION;
+}
+
+export function validateCorrectStockInput(input: CorrectStockInput): CorrectStockInput {
+  if (!input.operationId.trim()) throw new Error("Stock correction operation ID is required.");
+  return { quantity: validateStockCorrection(input.quantity), operationId: input.operationId };
+}
+
+/** Returns null for a no-op so matching quantities do not create audit noise. */
+export function calculateStockCorrection(currentQuantity: number, correctedQuantity: number): StockCorrectionCalculation | null {
+  const quantityBefore = normalizeQuantity(currentQuantity, "Current quantity", 0);
+  const quantityAfter = validateStockCorrection(correctedQuantity);
+  if (quantityBefore === quantityAfter) return null;
+  const quantityDelta = Math.round((quantityAfter - quantityBefore) * INVENTORY_PRECISION) / INVENTORY_PRECISION;
+  return { quantityBefore, quantityDelta, quantityAfter };
 }
 
 export function isStockUnit(value: string): value is StockUnit {
@@ -116,5 +148,7 @@ export function getStockHistoryEventLabel(type: InventoryEventType): string {
       return "Dose correction";
     case "dose_consumption_reapplied":
       return "Dose correction";
+    case "manual_adjustment":
+      return "Stock corrected";
   }
 }

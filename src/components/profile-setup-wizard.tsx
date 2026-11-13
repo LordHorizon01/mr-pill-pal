@@ -10,7 +10,8 @@ import { profileSetupColors, ui } from "@/components/ui-tokens";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { getAccountProfileSetupProgress, saveAccountProfileSetupDraft, startAccountProfileSetup, toAuthMessage } from "@/features/auth/auth.service";
 import { getPrimerNotificationPermission, requestPrimerNotificationPermission } from "@/notifications/notification.service";
-import { AccountProfileGender, AccountProfileRelationship, AccountProfileSetupDraft, AccountReminderPreference, clampDobDay, createDobValue, DOB_MIN_YEAR, getDobDaysInMonth, getProfileSetupAvatarUrl, nextTemporaryProfileName, toggleOptionalProfileChoice, buildAccountProfileSetupDetails } from "@/features/profiles/profile-setup.domain";
+import { AccountProfileGender, AccountProfileRelationship, AccountProfileSetupDraft, AccountReminderPreference, clampDobDate, clampDobDay, createDobValue, DOB_MIN_YEAR, getDobDaysInMonth, getDobYearValues, getProfileSetupAvatarUrl, nextTemporaryProfileName, resolveOptionalDobSelection, toggleOptionalProfileChoice, buildAccountProfileSetupDetails } from "@/features/profiles/profile-setup.domain";
+import { formatDateOfBirthForDisplay } from "@/features/profiles/profile.domain";
 import { getRemainingProfileSetupLoadingMs, PROFILE_SETUP_READY_REDUCED_VISIBLE_MS, PROFILE_SETUP_READY_VISIBLE_MS } from "@/features/first-run/handoff.domain";
 import { useAuthStore } from "@/state/auth.store";
 import { useProfileStore } from "@/state/profile.store";
@@ -35,9 +36,9 @@ const presetImages: ImageSourcePropType[] = [
   require("../../assets/ui/shared/avatars/avatar-preset-07.png"), require("../../assets/ui/shared/avatars/avatar-preset-08.png"),
 ];
 const presetKeys = [1,2,3,4,5,6,7,8].map(n => "avatar-preset-" + String(n).padStart(2,"0"));
-const genderOptions: Array<[AccountProfileGender,string]> = [["man","Male"],["woman","Female"],["nonbinary","Non-binary"],["prefer_not_to_say","Prefer not to say"],["other","Other"]];
-const relationOptions: Array<[AccountProfileRelationship,string]> = [["parent","Parent"],["partner","Partner"],["child","Child"],["relative","Relative"],["friend","Friend"],["other","Other"]];
-const reminderOptions: Array<[AccountReminderPreference,string]> = [["sound_vibration","Sound + vibration"],["sound","Sound"],["vibration","Vibration"],["quiet","Quiet"]];
+const genderOptions: [AccountProfileGender,string][] = [["man","Male"],["woman","Female"],["nonbinary","Non-binary"],["prefer_not_to_say","Prefer not to say"],["other","Other"]];
+const relationOptions: [AccountProfileRelationship,string][] = [["parent","Parent"],["partner","Partner"],["child","Child"],["relative","Relative"],["friend","Friend"],["other","Other"]];
+const reminderOptions: [AccountReminderPreference,string][] = [["sound_vibration","Sound + vibration"],["sound","Sound"],["vibration","Vibration"],["quiet","Quiet"]];
 const steps: Step[] = ["name","gender","dob","avatar","profileType","relationship","reminder","review"];
 const labels: Record<Step,string> = { name:"Name",gender:"Gender",dob:"Date of birth",avatar:"Profile photo",profileType:"Profile type",relationship:"Relationship",reminder:"Reminder preference",review:"Profile details",handoff:"Setup" };
 const blank: AccountProfileSetupDraft = { displayName:null,gender:null,genderOther:null,dateOfBirth:null,avatarUri:null,avatarPreset:null,profileType:null,relationship:null,relationshipOther:null,reminderPreference:null,answerStates:{fullName:"unanswered",gender:"unanswered",dateOfBirth:"unanswered",avatar:"unanswered",profileType:"unanswered",relationship:"unanswered",reminderPreference:"unanswered"},activeStep:"name" };
@@ -48,7 +49,7 @@ const wheelVisibleHeight = wheelRowHeight * 5;
 const wheelVerticalInset = wheelRowHeight * 2;
 
 function getInitialDobValue(now = new Date()): string {
-  const year = Math.max(DOB_MIN_YEAR, now.getFullYear() - 30);
+  const year = Math.max(DOB_MIN_YEAR, now.getFullYear());
   return createDobValue(year, now.getMonth() + 1, clampDobDay(year, now.getMonth() + 1, now.getDate()));
 }
 
@@ -58,8 +59,10 @@ function wait(ms: number): Promise<void> {
 
 export function ProfileSetupWizard({ onExit }: { onExit: () => void }) {
   const user = useAuthStore(s => s.user);
+  const userId = user?.uid;
   const setProfileReady = useAuthStore(s => s.setProfileReady);
   const profiles = useProfileStore(s => s.profiles);
+  const hasProfiles = profiles.length > 0;
   const createProfile = useProfileStore(s => s.createProfile);
   const { mode } = useAppTheme();
   const colors = profileSetupColors[mode];
@@ -85,10 +88,10 @@ export function ProfileSetupWizard({ onExit }: { onExit: () => void }) {
     return()=>{a.remove();b.remove();};
   },[]);
   useEffect(() => {
-    if(!user)return;
+    if(!userId)return;
     let active=true;
-    void getAccountProfileSetupProgress(user.uid,profiles.length>0).then(async result=>{
-      if(result.state==="NOT_STARTED")await startAccountProfileSetup(user.uid);
+    void getAccountProfileSetupProgress(userId,hasProfiles).then(async result=>{
+      if(result.state==="NOT_STARTED")await startAccountProfileSetup(userId);
       if(!active)return;
       const d={...blank,...result.draft};
       draftRef.current=d;setDraft(d);setStep(d.activeStep==="handoff"?"review":d.activeStep);
@@ -96,7 +99,7 @@ export function ProfileSetupWizard({ onExit }: { onExit: () => void }) {
       setReady(true);
     }).catch(e=>{if(active){setError(toAuthMessage(e,"We couldn't restore your setup. Check your connection and try again."));setReady(true);}});
     return()=>{active=false;};
-  },[user?.uid]);
+  },[hasProfiles,userId]);
   const shownSteps = useMemo(()=>steps.filter(s=>s!=="relationship"||draft.profileType==="care_for"),[draft.profileType]);
   const imageSource=avatarFor(draft);
   const artHeight=step==="dob"?Math.min(height*0.15,112):step==="avatar"?Math.min(height*0.24,176):Math.min(height*(keyboardOpen?0.18:0.32),keyboardOpen?155:250);
@@ -163,14 +166,19 @@ export function ProfileSetupWizard({ onExit }: { onExit: () => void }) {
     const d={...draft,activeStep:target};draftRef.current=d;setDraft(d);
     if(user)void saveAccountProfileSetupDraft(user.uid,d).catch(e=>setError(toAuthMessage(e,"Your edit couldn't be saved.")));
   }
-  if(!ready)return <SafeAreaView style={[s.waiting,{backgroundColor:colors.canvas}]}><ActivityIndicator color={colors.teal}/><Text style={{color:colors.textSecondary}}>Restoring your profile setup...</Text></SafeAreaView>;
+  if (!ready) return <SafeAreaView edges={["top", "bottom"]} style={[s.waiting, { backgroundColor: colors.canvas }]}>
+    <View accessibilityRole="progressbar" accessibilityLabel="Restoring your profile setup" style={s.waitingGroup}>
+      <ActivityIndicator size="large" color={colors.teal} />
+      <Text style={[s.waitingText, { color: colors.textSecondary }]}>Restoring your profile setup...</Text>
+    </View>
+  </SafeAreaView>;
   if(handoffPhase)return <SafeAreaView style={[s.handoff,{backgroundColor:colors.canvas}]}><Animated.View key={handoffPhase} entering={FadeIn.duration(reduceMotion?160:220)} exiting={FadeOut.duration(reduceMotion?120:180)} style={s.handoffInner}><Image source={screens.handoff} resizeMode="contain" accessible accessibilityLabel="Preparing your medication space" style={s.handoffImage}/><Text accessibilityRole="header" style={[s.handoffTitle,{color:colors.text}]}>{handoffPhase==="ready"?"You're all set":"Setting things up for you"}</Text><Text style={[s.handoffSupport,{color:colors.textSecondary}]}>{handoffPhase==="ready"?"Your medication space is ready.":"Preparing your medication space."}</Text>{handoffPhase==="ready"?<View accessibilityLabel="Setup complete" accessibilityRole="image" style={[s.handoffReady,{backgroundColor:colors.primarySoft}]}><Text style={{color:colors.teal,fontSize:17,fontWeight:"800"}}>✓</Text></View>:<ActivityIndicator accessibilityLabel="Setting things up" size={30} color={colors.teal} style={s.handoffLoader}/>}</Animated.View></SafeAreaView>;
   const stepIndex=shownSteps.indexOf(step);
   const skip=step==="name"?()=>void persist("gender",{displayName:nextTemporaryProfileName(profiles.map(p=>p.fullName)),answerStates:{...draft.answerStates,fullName:"skipped"}}):step==="gender"?()=>void persist("dob",{gender:null,genderOther:null,answerStates:{...draft.answerStates,gender:"skipped"}}):step==="dob"?()=>{setDobPreview(getInitialDobValue());setDobTouched(false);void persist("avatar",{dateOfBirth:null,answerStates:{...draft.answerStates,dateOfBirth:"skipped"}});}:step==="avatar"?()=>void persist("profileType",{avatarUri:null,avatarPreset:null,answerStates:{...draft.answerStates,avatar:"skipped"}}):step==="profileType"?()=>void persist("reminder",{profileType:null,relationship:null,relationshipOther:null,answerStates:{...draft.answerStates,profileType:"skipped",relationship:"unanswered"}}):step==="relationship"?()=>void persist("reminder",{relationship:null,relationshipOther:null,answerStates:{...draft.answerStates,relationship:"skipped"}}):step==="reminder"?()=>void persist("review",{reminderPreference:null,answerStates:{...draft.answerStates,reminderPreference:"skipped"}}):undefined;
   let visual:React.ReactNode;
   if(step==="reminder")visual=<View style={s.reminderArt}><ArtImage source={screens.reminder} maxHeight={artHeight*0.84} label="Reminder choices"/><AvatarPreview source={imageSource} size={72} colors={colors} label={draft.displayName||"Selected profile"}/></View>;
   else if(step==="review")visual=<View style={s.reviewArt}><AvatarPreview source={imageSource} size={116} colors={colors} label={draft.displayName||"Selected profile"}/></View>;
-  else if(step==="avatar"){const hasSelection=Boolean(draft.avatarUri||draft.avatarPreset);visual=<View style={s.avatarHeroFrame}><Animated.View key={draft.avatarUri??draft.avatarPreset??"context"} entering={FadeIn.duration(reduceMotion?140:210)} exiting={FadeOut.duration(reduceMotion?100:150)} style={s.avatarHeroContent}>{hasSelection?<AvatarPreview source={imageSource} size={158} colors={colors} label={draft.displayName||"Selected profile avatar"}/>:<ArtImage source={screens.avatar} maxHeight={artHeight} label="Choose a profile picture"/>}</Animated.View></View>;}
+  else if(step==="avatar"){const hasSelection=Boolean(draft.avatarUri||draft.avatarPreset);visual=<View style={[s.avatarHeroFrame,draft.avatarUri&&s.avatarHeroEditingFrame]}><Animated.View key={draft.avatarUri??draft.avatarPreset??"context"} entering={FadeIn.duration(reduceMotion?140:210)} exiting={FadeOut.duration(reduceMotion?100:150)} style={s.avatarHeroContent}>{hasSelection?<View style={s.avatarPhotoGroup}><AvatarPreview source={imageSource} size={158} colors={colors} label={draft.displayName||"Selected profile avatar"}/>{draft.avatarUri?<Pressable accessibilityRole="button" accessibilityLabel="Edit selected profile photo crop" accessibilityHint="Opens the device photo crop tool. Choose the same photo to adjust its crop." accessibilityState={{disabled:busy}} disabled={busy} onPress={()=>void choosePhoto()} style={[s.avatarPhotoEdit,{backgroundColor:colors.surface,borderColor:colors.borderStrong}]}><Text style={[s.avatarPhotoEditText,{color:colors.textPrimary}]}>✎</Text></Pressable>:null}</View>:<ArtImage source={screens.avatar} maxHeight={artHeight} label="Choose a profile picture"/>}</Animated.View></View>;}
   else visual=<View style={s.artWrap}><ArtImage source={step==="profileType"?screens.type:screens[step]} maxHeight={artHeight} label={labels[step]}/>{step==="name"&&draft.displayName?.trim()?<View pointerEvents="none" style={[s.initial,{backgroundColor:colors.coral}]}><Text style={[s.initialText,{color:colors.onTeal}]}>{draft.displayName.trim()[0].toUpperCase()}</Text></View>:null}{step==="profileType"?<View style={s.avatarOverlay}><AvatarPreview source={imageSource} size={66} colors={colors} label={draft.displayName||"Selected profile"}/></View>:null}</View>;
   return <ProfileSetupShell step={stepIndex+1} totalSteps={shownSteps.length} onBack={back} onSkip={skip} backDisabled={busy} skipDisabled={busy} visual={<Animated.View key={step+"-art"} entering={entering}>{visual}</Animated.View>}>
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS==="ios"?"padding":undefined}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.scroll}><Animated.View key={step} entering={entering} style={[s.card,{backgroundColor:colors.surface,borderColor:colors.border}]}>
@@ -187,7 +195,7 @@ export function ProfileSetupWizard({ onExit }: { onExit: () => void }) {
     </Animated.View></ScrollView><Pressable accessibilityRole="button" accessibilityState={{busy,disabled:busy}} disabled={busy} onPress={()=>{
       if(step==="name")void persist("gender",{displayName:draft.displayName?.trim()||nextTemporaryProfileName(profiles.map(p=>p.fullName))});
       else if(step==="gender")void persist("dob",{});
-      else if(step==="dob")void persist("avatar",{dateOfBirth:dobTouched?dobPreview:(draftRef.current.dateOfBirth??dobPreview)});
+      else if(step==="dob")void persist("avatar",{dateOfBirth:resolveOptionalDobSelection(dobPreview,dobTouched,draftRef.current.dateOfBirth)});
       else if(step==="avatar")void persist("profileType",{});
       else if(step==="profileType")void persist(draft.profileType==="care_for"?"relationship":"reminder",draft.profileType==="me"?{relationship:null,relationshipOther:null}:{});
       else if(step==="relationship")void persist("reminder",{});
@@ -200,29 +208,27 @@ function missingReviewAnswer(draft:AccountProfileSetupDraft,label:string){const 
 function question(step:Step){return({name:"What should we call this profile?",gender:"How do you identify?",dob:"When were you born?",avatar:"Choose a profile photo",profileType:"Who is this profile for?",relationship:"How are you connected?",reminder:"How should reminders feel?",review:"Profile details",handoff:"Setting things up for you"} as const)[step];}
 function avatarFor(d:AccountProfileSetupDraft):ImageSourcePropType{if(d.avatarUri)return{uri:d.avatarUri};if(d.avatarPreset)return presetImages[presetKeys.indexOf(d.avatarPreset)]??neutral;return neutral;}
 function profileRelationship(d:AccountProfileSetupDraft){if(d.profileType==="me")return"Self" as const;switch(d.relationship){case"partner":return"Spouse" as const;case"child":return"Child" as const;case"friend":case"other":return"Other" as const;default:return"Family member" as const;}}
-function dateLabel(v:string){const[y,m,d]=v.split("-").map(Number);return String(d).padStart(2,"0")+" "+monthNames[m-1]+" "+String(y);}
+function dateLabel(value:string){return formatDateOfBirthForDisplay(value);}
 function ArtImage({source,maxHeight,label}:{source:ImageSourcePropType;maxHeight:number;label:string}){return <Image source={source} resizeMode="contain" accessible={false} accessibilityLabel={label} style={{width:"100%",maxWidth:390,aspectRatio:4/3,maxHeight}}/>;}
-function AvatarPreview({source,size,colors,label}:{source:ImageSourcePropType;size:number;colors:Palette;label:string}){return <View style={[s.avatarPreview,{width:size,height:size,borderColor:colors.border,backgroundColor:colors.surface}]}><Image source={source} resizeMode="contain" accessible accessibilityRole="image" accessibilityLabel={label} style={{width:"100%",height:"100%"}}/></View>;}
+function AvatarPreview({source,size,colors,label}:{source:ImageSourcePropType;size:number;colors:Palette;label:string}){const isDevicePhoto=typeof source==="object"&&source!==null&&"uri" in source;return <View style={[s.avatarPreview,{width:size,height:size,borderColor:colors.border,backgroundColor:colors.surface}]}><Image source={source} resizeMode={isDevicePhoto?"cover":"contain"} accessible accessibilityRole="image" accessibilityLabel={label} style={{width:"100%",height:"100%",borderRadius:isDevicePhoto?Math.max(0,(size-4)/2):0}}/></View>;}
 function Choice({label,selected,onPress,colors}:{label:string;selected:boolean;onPress:()=>void;colors:Palette}){return <Pressable accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{checked:selected}} onPress={onPress} style={[s.choice,{backgroundColor:selected?colors.primarySoft:colors.surfaceSubtle,borderColor:selected?colors.primary:colors.borderStrong}]}><Text style={[s.choiceText,{color:colors.textPrimary}]}>{label}</Text><View style={[s.choiceCheckCircle,{borderColor:selected?colors.primary:colors.borderStrong,backgroundColor:selected?colors.primary:"transparent"}]}>{selected?<Animated.Text entering={FadeIn.duration(170)} style={{color:colors.onPrimary,fontWeight:"900"}}>✓</Animated.Text>:null}</View></Pressable>;}
 type WheelItem = { value: number; label: string; spoken: string };
 
 function DobWheel({value,hasSelection,onChange,colors,today}:{value:string;hasSelection:boolean;onChange:(value:string)=>void;colors:Palette;today:Date}) {
   const [yearValue,monthValue,dayValue]=value.split("-").map(Number);
-  const year=Math.min(yearValue,today.getFullYear());
+  const {year,month,day}=clampDobDate(yearValue,monthValue,dayValue,today);
   const maxMonth=year===today.getFullYear()?today.getMonth()+1:12;
-  const month=Math.min(monthValue,maxMonth);
   const monthDays=getDobDaysInMonth(year,month);
   const maxDay=year===today.getFullYear()&&month===today.getMonth()+1?Math.min(monthDays,today.getDate()):monthDays;
-  const day=clampDobDay(year,month,Math.min(dayValue,maxDay));
-  const years:WheelItem[]=Array.from({length:Math.max(1,today.getFullYear()-DOB_MIN_YEAR+1)},(_,index)=>{const value=today.getFullYear()-index;return{value,label:String(value),spoken:String(value)};});
+  const years:WheelItem[]=getDobYearValues(today.getFullYear()).map(value=>({value,label:String(value),spoken:String(value)}));
   const months=wheelMonths.slice(0,maxMonth);
   const days:WheelItem[]=Array.from({length:maxDay},(_,index)=>{const value=index+1;return{value,label:String(value).padStart(2,"0"),spoken:String(value)};});
   return <View style={[s.wheel,{backgroundColor:colors.surfaceSubtle,borderColor:colors.border}]}>
     <View style={s.wheelHeadings}><Text style={[s.wheelHeading,{color:colors.textSecondary}]}>DATE</Text><Text style={[s.wheelHeading,{color:colors.textSecondary}]}>MONTH</Text><Text style={[s.wheelHeading,{color:colors.textSecondary}]}>YEAR</Text></View>
     <View style={s.wheelColumns}>
-      <WheelColumn label="Date" items={days} selectedIndex={day-1} colors={colors} onSelect={next=>onChange(createDobValue(year,month,clampDobDay(year,month,next)))}/>
-      <WheelColumn label="Month" items={months} selectedIndex={month-1} colors={colors} onSelect={next=>{const nextMonth=Number(next);onChange(createDobValue(year,nextMonth,clampDobDay(year,nextMonth,day)));}}/>
-      <WheelColumn label="Year" items={years} selectedIndex={today.getFullYear()-year} colors={colors} onSelect={next=>{const nextYear=Number(next);const nextMonth=Math.min(month,nextYear===today.getFullYear()?today.getMonth()+1:12);const nextDayMax=nextYear===today.getFullYear()&&nextMonth===today.getMonth()+1?Math.min(getDobDaysInMonth(nextYear,nextMonth),today.getDate()):getDobDaysInMonth(nextYear,nextMonth);onChange(createDobValue(nextYear,nextMonth,Math.min(day,nextDayMax)));}}/>
+      <WheelColumn label="Date" items={days} selectedIndex={day-1} colors={colors} onSelect={next=>onChange(createDobValue(year,month,clampDobDay(year,month,next),today))}/>
+      <WheelColumn label="Month" items={months} selectedIndex={month-1} colors={colors} onSelect={next=>{const nextDate=clampDobDate(year,Number(next),day,today);onChange(createDobValue(nextDate.year,nextDate.month,nextDate.day,today));}}/>
+      <WheelColumn label="Year" items={years} selectedIndex={year-DOB_MIN_YEAR} colors={colors} onSelect={next=>{const nextDate=clampDobDate(Number(next),month,day,today);onChange(createDobValue(nextDate.year,nextDate.month,nextDate.day,today));}}/>
     </View>
     <View pointerEvents="none" style={[s.wheelSelectionBand,{backgroundColor:colors.primarySoft,borderColor:colors.primary}]}/>
     <Text accessibilityLiveRegion="polite" style={[s.selectedDate,{color:hasSelection?colors.primary:colors.textSecondary}]}>{hasSelection?dateLabel(value):"Optional - select a date or continue to confirm"}</Text>
@@ -270,16 +276,48 @@ function WheelColumn({label,items,selectedIndex,colors,onSelect}:{label:string;i
   </View>;
 }
 function ReminderSettings({value,colors,onChange,onEnable}:{value:AccountReminderPreference|null;colors:Palette;onChange:(v:AccountReminderPreference)=>void;onEnable:()=>void}){const[unresolved,setUnresolved]=useState(false);useEffect(()=>{let active=true;void getPrimerNotificationPermission().then(p=>{if(active)setUnresolved(p.status==="not_requested");}).catch(()=>{if(active)setUnresolved(true);});return()=>{active=false;};},[]);return <><View style={s.reminderGrid}>{reminderOptions.map(([v,label])=><Pressable key={v} accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{checked:value===v}} onPress={()=>onChange(v)} style={[s.reminderOption,{backgroundColor:value===v?colors.mint:colors.surface,borderColor:value===v?colors.teal:colors.border}]}><Text style={[s.reminderLabel,{color:colors.text}]}>{label}</Text><Text style={[s.reminderHint,{color:colors.textSecondary}]}>Your device settings apply</Text>{value===v?<Text style={{color:colors.teal,fontWeight:"900"}}>✓</Text>:null}</Pressable>)}</View>{unresolved?<View style={[s.primer,{backgroundColor:colors.mint}]}><Text style={{color:colors.text,fontSize:13,lineHeight:18}}>Allow notifications so Mr. Pill Pal can tell you when a scheduled dose is due.</Text><Pressable accessibilityRole="button" onPress={onEnable} style={s.enable}><Text style={{color:colors.teal,fontWeight:"800"}}>Enable notifications</Text></Pressable></View>:null}</>;}
-function Review({draft,colors,onEdit}:{draft:AccountProfileSetupDraft;colors:Palette;onEdit:(step:Exclude<Step,"review"|"handoff">)=>void}){const groups:Array<{title:string;rows:Array<{label:string;value:string|null;step:Exclude<Step,"review"|"handoff">}>}>=[{title:"Personal details",rows:[{label:"Name",value:draft.displayName,step:"name"},{label:"Gender",value:draft.gender?(draft.gender==="other"?draft.genderOther||"Other":genderOptions.find(x=>x[0]===draft.gender)?.[1]??null):null,step:"gender"},{label:"Date of birth",value:draft.dateOfBirth?dateLabel(draft.dateOfBirth):null,step:"dob"}]},{title:"Profile and reminders",rows:[{label:"Profile type",value:draft.profileType==="me"?"Me":draft.profileType==="care_for"?"Someone I care for":null,step:"profileType"},...(draft.profileType==="care_for"?[{label:"Relationship",value:draft.relationship?((relationOptions.find(x=>x[0]===draft.relationship)?.[1]??"Other")+(draft.relationship==="other"&&draft.relationshipOther?" - "+draft.relationshipOther:"")):null,step:"relationship" as const}]:[]),{label:"Reminder preference",value:draft.reminderPreference?reminderOptions.find(x=>x[0]===draft.reminderPreference)?.[1]??null:null,step:"reminder"},{label:"Photo",value:draft.avatarUri?"Photo chosen":draft.avatarPreset?"Preset avatar":null,step:"avatar"}]}];return <><View style={s.reviewPerson}><Text style={[s.reviewName,{color:colors.textPrimary}]}>{draft.displayName||"Your profile"}</Text><Text style={[s.reviewCaption,{color:colors.textSecondary}]}>Review your choices. You can change any detail.</Text></View>{groups.map(group=><View key={group.title} style={[s.reviewGroup,{backgroundColor:colors.surfaceSubtle}]}><Text style={[s.reviewGroupTitle,{color:colors.textPrimary}]}>{group.title}</Text>{group.rows.map(r=><View key={r.label} style={s.reviewRow}><View style={{flex:1}}><Text style={[s.reviewLabel,{color:colors.textSecondary}]}>{r.label}</Text><Text style={[s.reviewValue,{color:r.value?colors.textPrimary:colors.textSecondary}]}>{r.value??missingReviewAnswer(draft,r.label)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={(r.value?"Edit ":"Add ")+r.label} onPress={()=>onEdit(r.step)} style={s.edit}><Text style={{color:colors.primary,fontWeight:"800"}}>{r.value?"Edit":"Add"}</Text></Pressable></View>)}</View>)}</>;}
+function Review({draft,colors,onEdit}:{draft:AccountProfileSetupDraft;colors:Palette;onEdit:(step:Exclude<Step,"review"|"handoff">)=>void}){
+  const groups:{title:string;rows:{label:string;value:string|null;step:Exclude<Step,"review"|"handoff">}[]}[]=[
+    {title:"Personal details",rows:[
+      {label:"Name",value:draft.displayName,step:"name"},
+      {label:"Gender",value:draft.gender?(draft.gender==="other"?draft.genderOther||"Other":genderOptions.find(x=>x[0]===draft.gender)?.[1]??null):null,step:"gender"},
+      {label:"Date of birth",value:draft.dateOfBirth?dateLabel(draft.dateOfBirth):null,step:"dob"},
+    ]},
+    {title:"Profile and reminders",rows:[
+      {label:"Profile type",value:draft.profileType==="me"?"Me":draft.profileType==="care_for"?"Someone I care for":null,step:"profileType"},
+      ...(draft.profileType==="care_for"?[{label:"Relationship",value:draft.relationship?((relationOptions.find(x=>x[0]===draft.relationship)?.[1]??"Other")+(draft.relationship==="other"&&draft.relationshipOther?" - "+draft.relationshipOther:"")):null,step:"relationship" as const}]:[]),
+      {label:"Reminder preference",value:draft.reminderPreference?reminderOptions.find(x=>x[0]===draft.reminderPreference)?.[1]??null:null,step:"reminder"},
+      {label:"Photo",value:draft.avatarUri?"Photo chosen":draft.avatarPreset?"Preset avatar":null,step:"avatar"},
+    ]},
+  ];
+  return <>
+    <View style={s.reviewPerson}>
+      <Text style={[s.reviewName,{color:colors.textPrimary}]}>{draft.displayName||"Your profile"}</Text>
+      <Text style={[s.reviewCaption,{color:colors.textSecondary}]}>Review your choices. You can change any detail.</Text>
+    </View>
+    {groups.map(group=><View key={group.title} style={[s.reviewGroup,{backgroundColor:colors.surfaceSubtle}]}>
+      <Text style={[s.reviewGroupTitle,{color:colors.textPrimary}]}>{group.title}</Text>
+      {group.rows.map(r=><View key={r.label} style={s.reviewRow}>
+        <View style={{flex:1}}>
+          <Text style={[s.reviewLabel,{color:colors.textSecondary}]}>{r.label}</Text>
+          <Text style={[s.reviewValue,{color:r.value?colors.textPrimary:colors.textSecondary}]}>{r.value??missingReviewAnswer(draft,r.label)}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={(r.value?"Edit ":"Add ")+r.label} onPress={()=>onEdit(r.step)} style={s.edit}>
+          <Text style={{color:colors.primary,fontWeight:"800"}}>{r.value?"Edit":"Add"}</Text>
+        </Pressable>
+      </View>)}
+    </View>)}
+  </>;
+}
 const s=StyleSheet.create({
-  flex:{flex:1},waiting:{flex:1,justifyContent:"center",alignItems:"center",gap:12},scroll:{flexGrow:1,justifyContent:"center",paddingBottom:8},card:{borderWidth:1,borderRadius:18,padding:ui.spacing.md,gap:8},question:{fontSize:25,lineHeight:32,fontWeight:"800"},support:{fontSize:14,lineHeight:20,marginBottom:7},input:{minHeight:50,borderWidth:1,borderRadius:12,paddingHorizontal:14,fontSize:16,marginTop:8},
+  flex:{flex:1},waiting:{flex:1},waitingGroup:{flex:1,width:"100%",maxWidth:480,alignSelf:"center",alignItems:"center",justifyContent:"center",gap:8,paddingHorizontal:ui.spacing.screen},waitingText:{flexShrink:1,textAlign:"center",fontSize:15,lineHeight:21},scroll:{flexGrow:1,justifyContent:"center",paddingBottom:8},card:{borderWidth:1,borderRadius:18,padding:ui.spacing.md,gap:8},question:{fontSize:25,lineHeight:32,fontWeight:"800"},support:{fontSize:14,lineHeight:20,marginBottom:7},input:{minHeight:50,borderWidth:1,borderRadius:12,paddingHorizontal:14,fontSize:16,marginTop:8},
   grid:{flexDirection:"row",flexWrap:"wrap",gap:8,marginTop:5},genderGrid:{justifyContent:"center"},choice:{width:"48%",minHeight:48,flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:12,borderWidth:1,borderRadius:14,gap:6},choiceText:{flexShrink:1,fontSize:14,fontWeight:"700"},choiceCheckCircle:{width:20,height:20,borderRadius:10,borderWidth:1,alignItems:"center",justifyContent:"center"},
-  wheel:{position:"relative",borderWidth:1,borderRadius:16,paddingHorizontal:8,paddingVertical:6,marginTop:2,overflow:"hidden"},wheelHeadings:{height:18,flexDirection:"row",alignItems:"center",marginBottom:2},wheelHeading:{flex:1,textAlign:"center",fontSize:10,fontWeight:"800",letterSpacing:0.6},wheelColumns:{height:wheelVisibleHeight,flexDirection:"row",overflow:"hidden"},wheelColumn:{flex:1,minWidth:0,height:wheelVisibleHeight},wheelRow:{height:wheelRowHeight,alignItems:"center",justifyContent:"center"},wheelValue:{fontSize:16,fontVariant:["tabular-nums"]},wheelSelectionBand:{position:"absolute",top:6+18+2+wheelVerticalInset,left:8,right:8,height:wheelRowHeight,borderWidth:1,borderRadius:11},selectedDate:{textAlign:"center",minHeight:18,paddingTop:3,fontSize:12,fontWeight:"700"},
+  wheel:{position:"relative",borderWidth:1,borderRadius:16,paddingHorizontal:8,paddingVertical:6,marginTop:2,overflow:"hidden"},wheelHeadings:{height:18,flexDirection:"row",alignItems:"center",marginBottom:2},wheelHeading:{flex:1,textAlign:"center",fontSize:10,fontWeight:"800",letterSpacing:0.6},wheelColumns:{height:wheelVisibleHeight,flexDirection:"row",overflow:"hidden",zIndex:1},wheelColumn:{flex:1,minWidth:0,height:wheelVisibleHeight},wheelRow:{height:wheelRowHeight,alignItems:"center",justifyContent:"center"},wheelValue:{fontSize:16,fontVariant:["tabular-nums"]},wheelSelectionBand:{position:"absolute",top:6+18+2+wheelVerticalInset,left:8,right:8,height:wheelRowHeight,borderWidth:1,borderRadius:11,zIndex:0},selectedDate:{textAlign:"center",minHeight:18,paddingTop:3,fontSize:12,fontWeight:"700"},
   photoButton:{minHeight:48,alignItems:"center",justifyContent:"center",borderWidth:1,borderRadius:12},avatarGrid:{flexDirection:"row",flexWrap:"wrap",justifyContent:"center",gap:7,marginTop:9},avatarOption:{width:"22%",aspectRatio:1,borderRadius:999,borderWidth:2,padding:3},avatarImage:{width:"100%",height:"100%"},avatarCheckBadge:{position:"absolute",right:-5,top:-5,width:21,height:21,borderRadius:11,alignItems:"center",justifyContent:"center",backgroundColor:"white",borderWidth:1,borderColor:"white"},avatarCheck:{fontWeight:"900"},
   typeGrid:{flexDirection:"row",gap:8,marginTop:5},typeChoice:{flex:1,minHeight:60,flexDirection:"row",alignItems:"center",gap:6,borderWidth:1,borderRadius:14,paddingHorizontal:8},typeMark:{fontSize:20,fontWeight:"900"},typeLabel:{flex:1,fontSize:13,fontWeight:"700"},
   reminderGrid:{flexDirection:"row",flexWrap:"wrap",gap:8},reminderOption:{position:"relative",width:"48%",minHeight:64,borderWidth:1,borderRadius:13,justifyContent:"center",paddingHorizontal:8},reminderLabel:{fontSize:13,fontWeight:"800",paddingRight:12},reminderHint:{fontSize:10,marginTop:3},primer:{marginTop:9,padding:11,borderRadius:12,gap:5},enable:{minHeight:42,justifyContent:"center"},
   reviewPerson:{alignItems:"center",gap:5,marginBottom:4},avatarPreview:{borderRadius:999,borderWidth:2,overflow:"hidden",padding:2,alignItems:"center",justifyContent:"center"},reviewName:{fontSize:20,fontWeight:"800"},reviewCaption:{fontSize:13,lineHeight:18,textAlign:"center"},reviewGroup:{borderRadius:16,paddingHorizontal:12,paddingVertical:8,gap:2},reviewGroupTitle:{fontSize:14,fontWeight:"800",marginBottom:2},reviewRow:{minHeight:50,flexDirection:"row",alignItems:"center",gap:8},reviewLabel:{fontSize:12,fontWeight:"700"},reviewValue:{fontSize:14,fontWeight:"700",marginTop:2},edit:{minWidth:52,minHeight:44,alignItems:"center",justifyContent:"center"},
   error:{padding:10,borderRadius:10,fontSize:13,lineHeight:18,marginTop:5},action:{minHeight:52,borderRadius:14,justifyContent:"center",alignItems:"center",marginTop:8,flexDirection:"row",gap:8},actionText:{fontSize:16,fontWeight:"800"},disabled:{opacity:.6},
-  artWrap:{alignItems:"center"},initial:{position:"absolute",top:"12%",right:"20%",width:36,height:36,borderRadius:18,alignItems:"center",justifyContent:"center"},initialText:{fontSize:19,fontWeight:"900"},avatarOverlay:{position:"absolute",alignSelf:"center",bottom:"8%"},avatarHeroFrame:{height:176,width:"100%",alignItems:"center",justifyContent:"center"},avatarHeroContent:{width:"100%",alignItems:"center",justifyContent:"center"},reminderArt:{flexDirection:"row",alignItems:"center",gap:2},reviewArt:{alignItems:"center",paddingVertical:4},
+  artWrap:{alignItems:"center"},initial:{position:"absolute",top:"12%",right:"20%",width:36,height:36,borderRadius:18,alignItems:"center",justifyContent:"center"},initialText:{fontSize:19,fontWeight:"900"},avatarOverlay:{position:"absolute",alignSelf:"center",bottom:"8%"},avatarHeroFrame:{height:176,width:"100%",alignItems:"center",justifyContent:"center"},avatarHeroEditingFrame:{height:214},avatarHeroContent:{width:"100%",alignItems:"center",justifyContent:"center"},avatarPhotoGroup:{alignItems:"center",gap:2},avatarPhotoEdit:{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center",borderWidth:1,borderRadius:22,elevation:2},avatarPhotoEditText:{fontSize:17,lineHeight:21,fontWeight:"800"},reminderArt:{flexDirection:"row",alignItems:"center",gap:2},reviewArt:{alignItems:"center",paddingVertical:4},
   handoff:{flex:1,justifyContent:"center",alignItems:"center",paddingHorizontal:ui.spacing.xl},handoffInner:{width:"100%",maxWidth:420,alignItems:"center"},handoffImage:{width:280,height:245},handoffTitle:{marginTop:12,fontSize:25,fontWeight:"800",textAlign:"center"},handoffSupport:{marginTop:5,fontSize:14,lineHeight:20,textAlign:"center"},handoffLoader:{marginTop:18},handoffReady:{width:30,height:30,borderRadius:15,alignItems:"center",justifyContent:"center",marginTop:18}
 });

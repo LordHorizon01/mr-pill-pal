@@ -7,6 +7,8 @@ import {
   createProfileId,
   clampDobDay,
   createDobValue,
+  clampDobDate,
+  getDobYearValues,
   getDobDaysInMonth,
   getProfileSetupAvatarUrl,
   buildAccountProfileSetupDetails,
@@ -16,8 +18,9 @@ import {
   nextTemporaryProfileName,
   resolveProfileCreationId,
   toggleOptionalProfileChoice,
+  resolveOptionalDobSelection,
 } from "../src/features/profiles/profile-setup.domain";
-import { buildProfileUpdateInput, normalizeProfileInput } from "../src/features/profiles/profile.domain";
+import { buildProfileUpdateInput, formatDateOfBirthForDisplay, normalizeProfileInput, parseDateOfBirthFromDisplay } from "../src/features/profiles/profile.domain";
 import { buildAdditionalProfileInput, createBlankAdditionalProfileDraft, createProfileEditDraft, getLegacyPrimaryProfileSetupDetails } from "../src/features/profiles/profile-creation.domain";
 import { Profile } from "../src/features/profiles/profile.types";
 
@@ -60,6 +63,29 @@ test("DOB wheel day counts account for month lengths and leap years", () => {
   assert.equal(clampDobDay(2024, 2, 31), 29);
   assert.equal(createDobValue(2006, 10, 6), "2006-10-06");
   assert.throws(() => createDobValue(2006, 2, 29), /valid date/i);
+});
+
+test("DOB wheel years ascend from 1900 and clamp to the current date", () => {
+  const today = new Date(2026, 9, 20, 12);
+  assert.deepEqual(getDobYearValues(1902), [1900, 1901, 1902]);
+  assert.equal(getDobYearValues(1899).length, 0);
+  assert.deepEqual(clampDobDate(2024, 2, 31, today), { year: 2024, month: 2, day: 29 });
+  assert.deepEqual(clampDobDate(2027, 12, 31, today), { year: 2026, month: 10, day: 20 });
+  assert.equal(createDobValue(1900, 1, 1, new Date(2026, 9, 20, 12)), "1900-01-01");
+  assert.throws(() => createDobValue(1899, 12, 31, today), /valid date/i);
+  assert.throws(() => createDobValue(2026, 10, 21, today), /valid date/i);
+});
+
+test("an untouched optional DOB preview stays unset and existing DOB values are preserved", () => {
+  assert.equal(resolveOptionalDobSelection("2026-10-20", false, null), null);
+  assert.equal(resolveOptionalDobSelection("2026-10-20", false, "1974-03-27"), "1974-03-27");
+  assert.equal(resolveOptionalDobSelection("2026-10-20", true, null), "2026-10-20");
+});
+
+test("DOB display formatting round-trips DD-MM-YYYY and ISO values", () => {
+  assert.equal(formatDateOfBirthForDisplay("1974-03-27"), "27-03-1974");
+  assert.equal(parseDateOfBirthFromDisplay("27-03-1974"), "1974-03-27");
+  assert.equal(parseDateOfBirthFromDisplay("31-02-1974"), null);
 });
 
 test("profile setup keeps custom photos and stable preset/default avatar references in avatarUrl", () => {

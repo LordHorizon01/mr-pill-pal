@@ -151,7 +151,7 @@ export async function reconcileStoredLowStockEpisode(profileId: string, medicati
   });
 }
 
-export async function getLowStockMedicationIdsForAccount(accountUid: string): Promise<Array<{ profileId: string; medicationId: string }>> {
+export async function getLowStockMedicationIdsForAccount(accountUid: string): Promise<{ profileId: string; medicationId: string }[]> {
   if (!accountUid.trim()) return [];
   return runDatabaseOperation(async (db) => db.getAllAsync<{ profile_id: string; medication_id: string }>(
     `SELECT inventory.profile_id, inventory.medication_id
@@ -160,6 +160,40 @@ export async function getLowStockMedicationIdsForAccount(accountUid: string): Pr
      WHERE profile.account_uid = ? AND profile.deleted_at IS NULL`,
     [accountUid],
   ).then((rows) => rows.map((row) => ({ profileId: row.profile_id, medicationId: row.medication_id }))));
+}
+
+/** Returns every saved low-stock notification belonging to an account, including inactive profiles. */
+export async function getLowStockAlertNotificationsForAccount(accountUid: string): Promise<{ profileId: string; medicationId: string; notificationId: string }[]> {
+  if (!accountUid.trim()) return [];
+  return runDatabaseOperation(async (db) => {
+    const rows = await db.getAllAsync<{ profile_id: string; medication_id: string; native_notification_id: string }>(
+      `SELECT alerts.profile_id, alerts.medication_id, alerts.native_notification_id
+       FROM refill_alert_states AS alerts
+       INNER JOIN local_profiles AS profile ON profile.id = alerts.profile_id
+       WHERE profile.account_uid = ? AND alerts.native_notification_id IS NOT NULL`,
+      [accountUid],
+    );
+    return rows.map((row) => ({ profileId: row.profile_id, medicationId: row.medication_id, notificationId: row.native_notification_id }));
+  });
+}
+
+/** Clears IDs after cancellation; only an undelivered scheduled alert is re-armed for next sign-in. */
+export async function finalizeLowStockAlertsForAccountSignOut(
+  accountUid: string,
+  pendingNotificationIds: ReadonlySet<string>,
+): Promise<void> {
+  if (!accountUid.trim()) return;
+  const alerts = await getLowStockAlertNotificationsForAccount(accountUid);
+  await runExclusiveDatabaseTransaction(async (db) => {
+    for (const alert of alerts) {
+      await db.runAsync(
+        `UPDATE refill_alert_states
+         SET alert_status = ?, native_notification_id = NULL, updated_at = ?
+         WHERE profile_id = ? AND medication_id = ? AND native_notification_id = ?`,
+        [pendingNotificationIds.has(alert.notificationId) ? "pending" : "alerted", new Date().toISOString(), alert.profileId, alert.medicationId, alert.notificationId],
+      );
+    }
+  });
 }
 
 export async function markLowStockAlertPermissionRequired(profileId: string, medicationId: string): Promise<void> {

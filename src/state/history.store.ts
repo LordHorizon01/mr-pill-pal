@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import { getSafeDatabaseErrorMessage } from "@/database/database";
-import { getHistory } from "@/features/history/history.service";
+import { deleteHistoryRecord as deleteHistoryRecordInService, getHistory } from "@/features/history/history.service";
 import { getHistoryQueryKey } from "@/features/history/history.domain";
-import { deleteHistoryRecord as deleteHistoryRecordInService } from "@/features/history/history.service";
 import { HistoryDose, HistoryQuery } from "@/features/history/history.types";
 import { toLocalDateString } from "@/features/doses/dose.domain";
 import { useDoseStore } from "@/state/dose.store";

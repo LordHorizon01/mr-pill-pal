@@ -54,6 +54,7 @@ export default function MedicationsScreen() {
   const { fontScale } = useWindowDimensions();
   const styles = createStyles(colors);
   const store = useMedications();
+  const loadMedications = store.loadMedications;
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
   const medicationProfileId = useMedicationStore((state) => state.profileId);
   const loadedProfileId = useMedicationStore((state) => state.loadedProfileId);
@@ -69,6 +70,7 @@ export default function MedicationsScreen() {
   const [name, setName] = useState(""); const [dosage, setDosage] = useState("");
   const [filter, setFilter] = useState<Filter>("active"); const [editing, setEditing] = useState<Editing | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchProfileId, setSearchProfileId] = useState(selectedProfileId);
   const [isSuggestionSelectionComplete, setIsSuggestionSelectionComplete] = useState(false);
   const [pendingScrollMedicationId, setPendingScrollMedicationId] = useState<string | null>(null);
   const [highlightedMedicationId, setHighlightedMedicationId] = useState<string | null>(null);
@@ -87,16 +89,25 @@ export default function MedicationsScreen() {
   const submissionInFlightRef = useRef(false);
   const [overflowMedication, setOverflowMedication] = useState<Medication | null>(null);
   const [overflowAnchor, setOverflowAnchor] = useState<AnchoredMenuAnchor | null>(null);
+  if (searchProfileId !== selectedProfileId) {
+    setSearchProfileId(selectedProfileId);
+    setSearchQuery("");
+    setIsSuggestionSelectionComplete(false);
+    setPendingScrollMedicationId(null);
+    setHighlightedMedicationId(null);
+    setIsAlphabetRailCardAreaVisible(false);
+  }
   const hasCurrentMedicationData = medicationProfileId === selectedProfileId && loadedProfileId === selectedProfileId && loadedFilter === filter;
   const delayedLoadingVisible = useDelayedLoading(store.isLoading && !hasCurrentMedicationData);
   const showFirstScopeSkeleton = !store.error && !hasCurrentMedicationData && delayedLoadingVisible;
   const hasCurrentMedicationContent = hasCurrentMedicationData;
-  const scopedMedications = hasCurrentMedicationContent ? store.medications : [];
+  const scopedMedications = useMemo(() => hasCurrentMedicationContent ? store.medications : [], [hasCurrentMedicationContent, store.medications]);
   const currentSearchQueryRef = useRef(searchQuery);
   const currentTargetIdRef = useRef(pendingScrollMedicationId);
-  currentSearchQueryRef.current = searchQuery;
-  currentTargetIdRef.current = pendingScrollMedicationId;
-  useFocusEffect(useCallback(() => { void store.loadMedications(filter); return () => setNotice(null); }, [filter, selectedProfileId, store.loadMedications]));
+  useFocusEffect(useCallback(() => {
+    if (useProfileStore.getState().selectedProfileId === selectedProfileId) void loadMedications(filter);
+    return () => setNotice(null);
+  }, [filter, loadMedications, selectedProfileId]));
   const clearJumpHighlight = useCallback(() => {
     if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
     highlightTimeoutRef.current = null;
@@ -118,13 +129,18 @@ export default function MedicationsScreen() {
   }, []);
   const clearActiveScrollRequest = useCallback(() => { activeScrollRequestRef.current = null; }, []);
   useEffect(() => () => { if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current); }, []);
-  useEffect(() => { setSearchQuery(""); setIsSuggestionSelectionComplete(false); cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); }, [cancelPendingMedicationJump, clearActiveScrollRequest, clearJumpHighlight, selectedProfileId]);
-  useEffect(() => { setIsAlphabetRailCardAreaVisible(false); cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); }, [cancelPendingMedicationJump, clearActiveScrollRequest, clearJumpHighlight, filter, selectedProfileId]);
+  useEffect(() => {
+    if (pendingJumpFrameRef.current !== null) cancelAnimationFrame(pendingJumpFrameRef.current);
+    pendingJumpFrameRef.current = null;
+    pendingJumpScopeRef.current = null;
+    activeScrollRequestRef.current = null;
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = null;
+  }, [selectedProfileId]);
   const changed = useMemo(() => Boolean(editing && hasMedicationChanges(editing as Medication, { name, dosage })), [name, dosage, editing]);
   const normalizedSearchQuery = useMemo(() => normalizeMedicationSearchQuery(searchQuery), [searchQuery]);
   const lifecycleMedications = useMemo(() => filterMedicationsByLifecycle(scopedMedications, filter), [scopedMedications, filter]);
   const visibleMedications = useMemo(() => sortMedicationsAlphabetically(filterMedicationsBySearch(lifecycleMedications, searchQuery)), [lifecycleMedications, searchQuery]);
-  visibleMedicationsRef.current = visibleMedications;
   const suggestions = useMemo(() => getMedicationSearchSuggestions(lifecycleMedications, searchQuery), [lifecycleMedications, searchQuery]);
   const availableAlphabetBuckets = useMemo(() => getAvailableMedicationAlphabetBuckets(lifecycleMedications), [lifecycleMedications]);
   const alphabetRailEligible = useMemo(() => shouldShowMedicationAlphabetRail(lifecycleMedications, searchQuery), [lifecycleMedications, searchQuery]);
@@ -144,17 +160,22 @@ export default function MedicationsScreen() {
   const alphabetScopeRef = useRef({ filter, profileId: selectedProfileId });
   const alphabetBucketsRef = useRef(availableAlphabetBuckets);
   const alphabetRailEligibleRef = useRef(alphabetRailEligible);
-  alphabetBucketsRef.current = availableAlphabetBuckets;
-  alphabetRailEligibleRef.current = hasCurrentProfileMedications && alphabetRailEligible && supportsCompactAlphabetRail;
-  const alphabetViewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-  const onAlphabetViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+  const alphabetViewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 50 }), []);
+  const onAlphabetViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (!alphabetRailEligibleRef.current) return;
     const bucket = getMostRelevantVisibleMedicationAlphabetBucket(
       viewableItems as { item: Pick<Medication, "name">; index: number | null; isViewable: boolean }[],
       alphabetBucketsRef.current,
     );
     if (bucket) setActiveAlphabetBucket(bucket);
-  }).current;
+  }, []);
+  useEffect(() => {
+    currentSearchQueryRef.current = searchQuery;
+    currentTargetIdRef.current = pendingScrollMedicationId;
+    visibleMedicationsRef.current = visibleMedications;
+    alphabetBucketsRef.current = availableAlphabetBuckets;
+    alphabetRailEligibleRef.current = hasCurrentProfileMedications && alphabetRailEligible && supportsCompactAlphabetRail;
+  }, [alphabetRailEligible, availableAlphabetBuckets, hasCurrentProfileMedications, pendingScrollMedicationId, searchQuery, supportsCompactAlphabetRail, visibleMedications]);
   useEffect(() => {
     const scopeChanged = alphabetScopeRef.current.filter !== filter || alphabetScopeRef.current.profileId !== selectedProfileId;
     alphabetScopeRef.current = { filter, profileId: selectedProfileId };
@@ -171,18 +192,21 @@ export default function MedicationsScreen() {
   useEffect(() => {
     const pendingScope = pendingJumpScopeRef.current;
     if (!pendingScrollMedicationId || normalizedSearchQuery) return;
-    if (medicationProfileId !== selectedProfileId) {
-      cancelPendingMedicationJump();
-      return;
-    }
-    if (!pendingScope || pendingScope.filter !== filter || pendingScope.profileId !== selectedProfileId) {
-      cancelPendingMedicationJump();
-      return;
-    }
+    if (medicationProfileId !== selectedProfileId) return;
+    if (!pendingScope || pendingScope.filter !== filter || pendingScope.profileId !== selectedProfileId) return;
     const plan = getMedicationSearchJumpPlanAfterListRestore(visibleMedications, pendingScrollMedicationId, searchQuery);
     if (!plan) {
-      cancelPendingMedicationJump();
-      return;
+      const frame = requestAnimationFrame(() => {
+        if (pendingJumpScopeRef.current !== pendingScope) return;
+        pendingJumpFrameRef.current = null;
+        pendingJumpScopeRef.current = null;
+        setPendingScrollMedicationId((current) => current === pendingScrollMedicationId ? null : current);
+      });
+      pendingJumpFrameRef.current = frame;
+      return () => {
+        cancelAnimationFrame(frame);
+        if (pendingJumpFrameRef.current === frame) pendingJumpFrameRef.current = null;
+      };
     }
 
     const frame = requestAnimationFrame(() => {
@@ -213,7 +237,7 @@ export default function MedicationsScreen() {
       cancelAnimationFrame(frame);
       if (pendingJumpFrameRef.current === frame) pendingJumpFrameRef.current = null;
     };
-  }, [cancelPendingMedicationJump, filter, medicationProfileId, normalizedSearchQuery, pendingScrollMedicationId, searchQuery, selectedProfileId, visibleMedications]);
+  }, [cancelPendingMedicationJump, filter, medicationProfileId, normalizedSearchQuery, pendingScrollMedicationId, performMedicationSearchJump, searchQuery, selectedProfileId, visibleMedications]);
   const cancelEdit = () => { setEditing(null); setName(""); setDosage(""); setNameError(null); setDosageError(null); setSubmitError(null); };
   const updateName = (value: string) => { setName(value); setNameError(null); setSubmitError(null); };
   const updateDosage = (value: string) => { setDosage(value); setDosageError(null); setSubmitError(null); };
@@ -263,6 +287,14 @@ export default function MedicationsScreen() {
   const closeOverflow = () => { setOverflowMedication(null); setOverflowAnchor(null); };
   const updateSearchQuery = (value: string) => { cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); setSearchQuery(value); setIsSuggestionSelectionComplete(false); };
   const clearSearch = () => { cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); setSearchQuery(""); setIsSuggestionSelectionComplete(false); };
+  const changeFilter = (nextFilter: Filter) => {
+    if (nextFilter === filter) return;
+    setFilter(nextFilter);
+    setIsAlphabetRailCardAreaVisible(false);
+    cancelPendingMedicationJump();
+    clearActiveScrollRequest();
+    clearJumpHighlight();
+  };
   const jumpToMedication = (medicationId: string) => { cancelPendingMedicationJump(); clearActiveScrollRequest(); clearJumpHighlight(); const request = createMedicationSearchJumpRequest(medicationId); pendingJumpScopeRef.current = { filter, profileId: selectedProfileId }; setPendingScrollMedicationId(request.medicationId); setSearchQuery(request.nextSearchQuery); setIsSuggestionSelectionComplete(true); Keyboard.dismiss(); };
   const submitMedicationSearch = () => { const request = medicationProfileId === selectedProfileId ? getMedicationSearchSubmitJumpRequest(lifecycleMedications, searchQuery) : null; if (request) jumpToMedication(request.medicationId); else Keyboard.dismiss(); };
   const jumpToAlphabetBucket = (bucket: string) => { const index = visibleMedications.findIndex((medication) => getMedicationAlphabetBucket(medication.name) === bucket); if (index >= 0) { setActiveAlphabetBucket(bucket); clearActiveScrollRequest(); medicationListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.08 }); } };
@@ -274,7 +306,7 @@ export default function MedicationsScreen() {
         <View style={styles.searchContainer}><TextInput accessibilityLabel="Search medications" accessibilityHint="Type a medication name to filter. Use Search to jump to the first suggestion." placeholder="Search medications" placeholderTextColor={colors.muted} value={searchQuery} onChangeText={updateSearchQuery} onFocus={() => setIsSuggestionSelectionComplete(false)} style={styles.searchInput} returnKeyType="search" blurOnSubmit onSubmitEditing={submitMedicationSearch} autoCorrect={false} autoCapitalize="none" />{normalizedSearchQuery ? <Pressable onPress={clearSearch} style={styles.clearSearchButton} accessibilityRole="button" accessibilityLabel="Clear medication search"><Text style={styles.clearSearchText}>Clear</Text></Pressable> : null}</View>
       </View>
       {showSuggestions && searchDropdownTop !== null ? <View style={[styles.suggestions, { top: searchDropdownTop }]} accessible={false}>{suggestions.map((medication) => <Pressable key={medication.id} style={styles.suggestionRow} onPress={() => jumpToMedication(medication.id)} accessibilityRole="button" accessibilityLabel={getMedicationSearchSuggestionAccessibilityLabel(medication)} accessibilityHint="Clears the search and scrolls to this medication card."><Text numberOfLines={1} style={styles.suggestionName}>{medication.name}</Text><Text numberOfLines={1} style={styles.suggestionDosage}>{medication.dosage}</Text></Pressable>)}</View> : null}
-      <View style={styles.filters}>{(["active", "paused", "archived"] as const).map((v) => <ThemedChip key={v} label={v[0].toUpperCase() + v.slice(1)} selected={filter === v} onPress={() => setFilter(v)} accessibilityLabel={`${v} medications${filter === v ? ", selected" : ""}`} style={styles.filterChip} hitSlop={6} />)}</View>
+      <View style={styles.filters}>{(["active", "paused", "archived"] as const).map((v) => <ThemedChip key={v} label={v[0].toUpperCase() + v.slice(1)} selected={filter === v} onPress={() => changeFilter(v)} accessibilityLabel={`${v} medications${filter === v ? ", selected" : ""}`} style={styles.filterChip} hitSlop={6} />)}</View>
       {store.error ? <Pressable onPress={store.clearError} style={styles.error} accessibilityRole="button" accessibilityLabel={`${store.error}. Tap to dismiss.`}><Text accessibilityRole="alert" style={styles.messageText}>{store.error}</Text><Text>Tap to dismiss</Text></Pressable> : null}<AutoDismissNotice message={notice} onDismiss={() => setNotice(null)} />
       <View style={styles.form}>
         <Text accessibilityRole="header" style={styles.formTitle}>{editing ? "Edit Medication" : "Add medication"}</Text>

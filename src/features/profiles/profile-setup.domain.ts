@@ -79,6 +79,11 @@ export function toggleOptionalProfileChoice<T extends string>(
 
 export const DOB_MIN_YEAR = 1900;
 
+export function getDobYearValues(currentYear: number): number[] {
+  if (!Number.isInteger(currentYear) || currentYear < DOB_MIN_YEAR) return [];
+  return Array.from({ length: currentYear - DOB_MIN_YEAR + 1 }, (_, index) => DOB_MIN_YEAR + index);
+}
+
 /** Month uses the familiar 1-12 calendar convention. */
 export function getDobDaysInMonth(year: number, month: number): number {
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return 0;
@@ -91,11 +96,34 @@ export function clampDobDay(year: number, month: number, day: number): number {
   return Math.min(Math.max(Math.trunc(day) || 1, 1), lastDay);
 }
 
-export function createDobValue(year: number, month: number, day: number): string {
-  if (year < DOB_MIN_YEAR || month < 1 || month > 12 || day < 1 || day > getDobDaysInMonth(year, month)) {
+export function clampDobDate(year: number, month: number, day: number, today = new Date()): { year: number; month: number; day: number } {
+  const currentYear = today.getFullYear();
+  const safeYear = Math.min(currentYear, Math.max(DOB_MIN_YEAR, Math.trunc(year) || DOB_MIN_YEAR));
+  const maxMonth = safeYear === currentYear ? today.getMonth() + 1 : 12;
+  const safeMonth = Math.min(maxMonth, Math.max(1, Math.trunc(month) || 1));
+  const monthDays = getDobDaysInMonth(safeYear, safeMonth);
+  const maxDay = safeYear === currentYear && safeMonth === today.getMonth() + 1
+    ? Math.min(monthDays, today.getDate())
+    : monthDays;
+  const safeDay = Math.min(maxDay, Math.max(1, Math.trunc(day) || 1));
+  return { year: safeYear, month: safeMonth, day: safeDay };
+}
+
+export function createDobValue(year: number, month: number, day: number, today = new Date()): string {
+  const parsed = new Date(year, month - 1, day, 12);
+  const latestAllowed = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+  if (
+    !Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) ||
+    year < DOB_MIN_YEAR || month < 1 || month > 12 || day < 1 || day > getDobDaysInMonth(year, month) ||
+    parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day || parsed > latestAllowed
+  ) {
     throw new Error("Enter a valid date of birth.");
   }
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export function resolveOptionalDobSelection(preview: string, wasSelected: boolean, existingValue: string | null): string | null {
+  return wasSelected ? preview : existingValue;
 }
 
 /** The existing avatarUrl field stores either the local photo URI or a stable bundled-asset key. */
@@ -291,6 +319,9 @@ export function getProfileSetupMessage(
   }
   if (code === "firestore/unavailable" || code === "unavailable" || code === "auth/network-request-failed") {
     return "You're offline. Connect to the internet to finish account setup.";
+  }
+  if (code === "offline/startup-timeout" || code === "firestore/deadline-exceeded") {
+    return "An internet connection is required to confirm this setup. Your saved local medicines remain available.";
   }
   if (code === "firestore/invalid-argument" || code === "invalid-argument") {
     return "Some profile information is invalid. Please review it and try again.";
