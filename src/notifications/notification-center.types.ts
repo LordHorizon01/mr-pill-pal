@@ -42,7 +42,8 @@ export type NotificationHistoryPage = {
 };
 
 export type NotificationPresentation = {
-  title: string;
-  message: string;
+  primaryMessage: string;
+  secondaryMessage: string;
+  supportingMessage?: string;
   isForAnotherProfile: boolean;
 };

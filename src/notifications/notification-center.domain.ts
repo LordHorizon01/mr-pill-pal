@@ -84,11 +84,39 @@ export function getUnreadBadgeLabel(unreadCount: number): string | null {
   return unreadCount > 99 ? "99+" : String(Math.floor(unreadCount));
 }
 
+export const NOTIFICATION_READ_RETENTION_MS = 48 * 60 * 60 * 1000;
+
+/** Returns the inclusive read-at cutoff for expired history entries. */
+export function getNotificationReadExpiryCutoff(now = Date.now()): string {
+  return new Date(now - NOTIFICATION_READ_RETENTION_MS).toISOString();
+}
+
+/** Pure retention rule, injectable with a fixed clock for deterministic tests. */
+export function isReadNotificationExpired(readAt: string | null | undefined, now = Date.now()): boolean {
+  if (!readAt) return false;
+  const timestamp = Date.parse(readAt);
+  return Number.isFinite(timestamp) && timestamp <= now - NOTIFICATION_READ_RETENTION_MS;
+}
+
 function getProfileLabel(event: NotificationEvent): string {
   if (event.profileRelationship === "Mother" || event.profileRelationship === "Father") {
     return event.profileRelationship;
   }
   return event.profileDisplayName;
+}
+
+function stripProfilePrefix(message: string, event: NotificationEvent): string {
+  const prefixes = [event.profileDisplayName, event.profileRelationship]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  for (const prefix of prefixes) {
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const cleaned = message.replace(new RegExp(`^${escapedPrefix}\\s*[-:–]\\s*`, "i"), "").trim();
+    if (cleaned !== message) return cleaned;
+  }
+  const reminderBody = message.replace(/^.+?\s+-\s+(?=Time to take\b)/i, "").trim();
+  if (reminderBody !== message) return reminderBody;
+  return message.trim();
 }
 
 /** Formats private/cross-profile messages for the current user without changing selected-profile state. */
@@ -100,49 +128,39 @@ export function formatNotificationPresentation(
   const isForAnotherProfile = !selectedProfileId || event.profileId !== selectedProfileId;
   const profileLabel = getProfileLabel(event);
 
-  if (event.category === "medication_reminder") {
-    if (hideMedicationName) {
-      return isForAnotherProfile
-        ? {
-            title: `Medication reminder for ${profileLabel}`,
-            message: `Switch to ${profileLabel}'s profile to view the details.`,
-            isForAnotherProfile,
-          }
-        : { title: "Medication reminder", message: "You have a scheduled medication reminder.", isForAnotherProfile };
-    }
-    return isForAnotherProfile
-      ? {
-          title: `Medication reminder for ${profileLabel}`,
-          message: `${event.message} Switch to ${profileLabel}'s profile to manage this dose.`,
-          isForAnotherProfile,
-        }
-      : { title: event.title, message: event.message, isForAnotherProfile };
-  }
+  const isMedicationReminder = event.category === "medication_reminder";
+  const privatePrimary = isMedicationReminder ? "Medication reminder" : "Refill reminder";
+  const message = stripProfilePrefix(event.message, event);
+  const isGenericReminderBody = /^(?:reminder for\b|it is time for a medication reminder\b|open mr\. pill pal to review this notification\b)/i.test(message);
+  const primaryMessage = hideMedicationName || isGenericReminderBody || !message
+    ? privatePrimary
+    : message;
+  const secondaryMessage = `Medication for ${profileLabel}`;
+  const supportingMessage = isForAnotherProfile
+    ? `Switch to ${profileLabel}'s profile to ${isMedicationReminder ? "manage this reminder" : "review stock"}.`
+    : !isMedicationReminder && (hideMedicationName || isGenericReminderBody)
+      ? "Medication stock is running low. Open Mr. Pill Pal to review it."
+      : undefined;
 
-  if (hideMedicationName) {
-    return isForAnotherProfile
-      ? {
-          title: `Refill reminder for ${profileLabel}`,
-          message: `Medication stock is running low. Switch to ${profileLabel}'s profile to review it.`,
-          isForAnotherProfile,
-        }
-      : { title: "Refill reminder", message: "Recorded medication stock is running low. Open Mr. Pill Pal to review it.", isForAnotherProfile };
-  }
-  return isForAnotherProfile
-    ? {
-        title: `Low stock warning for ${profileLabel}`,
-        message: `${event.message} Switch to ${profileLabel}'s profile to review stock.`,
-        isForAnotherProfile,
-      }
-    : { title: event.title, message: event.message, isForAnotherProfile };
+  return {
+    primaryMessage,
+    secondaryMessage,
+    ...(supportingMessage ? { supportingMessage } : {}),
+    isForAnotherProfile,
+  };
 }
 
 export function formatNotificationTimestamp(timestamp: string, now = Date.now()): string {
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "Recently observed";
+  if (Number.isNaN(date.getTime())) return "Recently";
   const elapsed = Math.max(0, now - date.getTime());
-  if (elapsed < 60_000) return "Just now";
+  if (elapsed < 10_000) return "Just now";
+  if (elapsed < 60_000) return `${Math.floor(elapsed / 1_000)} sec ago`;
   if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} min ago`;
-  if (elapsed < 86_400_000) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
+  if (elapsed < 86_400_000) {
+    const hours = Math.floor(elapsed / 3_600_000);
+    return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.floor(elapsed / 86_400_000);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }

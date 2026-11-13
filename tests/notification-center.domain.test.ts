@@ -4,8 +4,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 import {
   formatNotificationPresentation,
+  formatNotificationTimestamp,
+  getNotificationReadExpiryCutoff,
   getNotificationEventKey,
   getUnreadBadgeLabel,
+  isReadNotificationExpired,
   mergeObservationSources,
   parseNotificationObservation,
 } from "../src/notifications/notification-center.domain";
@@ -86,9 +89,9 @@ test("unread badge hides zero, shows exact counts, and caps values above 99", ()
 test("cross-profile reminders identify the profile and explicitly request a user-led switch", () => {
   const presentation = formatNotificationPresentation(event(), "self-profile", false);
   assert.equal(presentation.isForAnotherProfile, true);
-  assert.equal(presentation.title, "Medication reminder for Mother");
-  assert.match(presentation.message, /Switch to Mother's profile/);
-  assert.match(presentation.message, /Paracetamol/);
+  assert.equal(presentation.primaryMessage, "Time to take Paracetamol");
+  assert.equal(presentation.secondaryMessage, "Medication for Mother");
+  assert.match(presentation.supportingMessage ?? "", /Switch to Mother's profile to manage this reminder/);
   // Presentation is a pure formatter; it cannot change the selected-profile state.
   assert.equal(event().profileId, "mother-profile");
 });
@@ -96,10 +99,12 @@ test("cross-profile reminders identify the profile and explicitly request a user
 test("privacy mode hides medication names in own-profile and cross-profile text", () => {
   const ownProfile = formatNotificationPresentation(event(), "mother-profile", true);
   const otherProfile = formatNotificationPresentation(event(), "self-profile", true);
-  assert.equal(ownProfile.message, "You have a scheduled medication reminder.");
-  assert.equal(otherProfile.title, "Medication reminder for Mother");
-  assert.match(otherProfile.message, /Switch to Mother's profile/);
-  assert.doesNotMatch(`${ownProfile.title} ${ownProfile.message} ${otherProfile.message}`, /Paracetamol/);
+  assert.equal(ownProfile.primaryMessage, "Medication reminder");
+  assert.equal(ownProfile.secondaryMessage, "Medication for Mother");
+  assert.equal(otherProfile.primaryMessage, "Medication reminder");
+  assert.equal(otherProfile.secondaryMessage, "Medication for Mother");
+  assert.match(otherProfile.supportingMessage ?? "", /Switch to Mother's profile/);
+  assert.doesNotMatch(`${ownProfile.primaryMessage} ${ownProfile.secondaryMessage} ${otherProfile.primaryMessage} ${otherProfile.secondaryMessage} ${otherProfile.supportingMessage}`, /Paracetamol/);
 });
 
 test("notification history table persists account scope, observation evidence, occurrence identity, and read state", () => {
@@ -110,6 +115,11 @@ test("notification history table persists account scope, observation evidence, o
   assert.match(CREATE_NOTIFICATION_EVENTS_TABLE, /scheduled_time TEXT/);
   assert.match(CREATE_NOTIFICATION_EVENTS_TABLE, /observed_at TEXT NOT NULL/);
   assert.match(CREATE_NOTIFICATION_EVENTS_TABLE, /read_at TEXT/);
+});
+
+test("newly recorded events default to unread until a user marks them read", () => {
+  const repository = readFileSync(resolve(process.cwd(), "src/notifications/notification-history.repository.ts"), "utf8");
+  assert.match(repository, /delivery_sources_json, read_at\s+\) VALUES \([\s\S]*?NULL\)/);
 });
 
 test("history queries and read actions are scoped to the supplied authenticated account", () => {
@@ -162,7 +172,8 @@ test("signed-out cleanup clears active account UI state without deleting durable
   const repository = readFileSync(resolve(process.cwd(), "src/notifications/notification-history.repository.ts"), "utf8");
   assert.match(provider, /clearAccount\(accountUid\)/);
   assert.match(store, /if \(accountUid && get\(\)\.accountUid !== accountUid\) return/);
-  assert.doesNotMatch(repository, /DELETE FROM notification_events/);
+  assert.doesNotMatch(provider, /DELETE FROM notification_events/);
+  assert.match(repository, /DELETE FROM notification_events\s+WHERE account_uid = \? AND read_at IS NOT NULL AND read_at <= \?/);
 });
 
 test("notification panel supports safe-area placement, outside and Android Back dismissal, and pagination", () => {
@@ -171,7 +182,7 @@ test("notification panel supports safe-area placement, outside and Android Back 
   assert.match(overlay, /useSafeAreaInsets/);
   assert.match(overlay, /onRequestClose=\{closePanel\}/);
   assert.match(overlay, /accessibilityLabel="Close notifications" onPress=\{closePanel\} style=\{\[StyleSheet\.absoluteFill/);
-  assert.match(overlay, /onEndReached=\{\(\) => \{ if \(hasMore\) onLoadMore\(\); \}\}/);
+  assert.match(overlay, /onEndReached=\{\(\) => \{ if \(hasMore && !isLoadingMore\) onLoadMore\(\); \}\}/);
   assert.match(repository, /LIMIT \? OFFSET \?/);
 });
 
@@ -197,8 +208,130 @@ test("Home notification bell exposes an accessible large touch target and a capp
 test("individual read actions and Mark all as read remain in the panel without routing", () => {
   const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
   const provider = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-provider.tsx"), "utf8");
+  const store = readFileSync(resolve(process.cwd(), "src/state/notification-center.store.ts"), "utf8");
   assert.match(overlay, /Mark all as read/);
-  assert.match(overlay, /Marks this notification as read without opening another screen/);
+  assert.match(overlay, /Mark notification as read/);
+  assert.match(overlay, /does not change medication records/);
   assert.doesNotMatch(provider, /router\.(push|navigate)/);
-  assert.match(provider, /markAllNotificationsAsRead\(accountUid\)/);
+  assert.match(provider, /markAllNotificationsAsRead\(accountUid, readAt\)/);
+  assert.match(store, /if \(!event \|\| event\.readAt\) return/);
+  assert.match(store, /unreadCount: Math\.max\(0, state\.unreadCount - 1\)/);
+  assert.match(store, /unreadCount: 0/);
+});
+
+test("read notification retention is deterministic at the 48-hour boundary", () => {
+  const readAt = Date.parse("2026-11-13T14:34:00.000Z");
+  const expiry = readAt + 48 * 60 * 60 * 1000;
+  assert.equal(isReadNotificationExpired(new Date(readAt).toISOString(), expiry - 1), false);
+  assert.equal(isReadNotificationExpired(new Date(readAt).toISOString(), expiry), true);
+  assert.equal(isReadNotificationExpired(new Date(readAt).toISOString(), expiry + 1), true);
+  assert.equal(isReadNotificationExpired(null, expiry + 86_400_000), false);
+  assert.equal(getNotificationReadExpiryCutoff(expiry), new Date(readAt).toISOString());
+});
+
+test("expiry SQL deletes only expired read rows for the supplied account", () => {
+  const repository = readFileSync(resolve(process.cwd(), "src/notifications/notification-history.repository.ts"), "utf8");
+  assert.match(repository, /DELETE FROM notification_events\s+WHERE account_uid = \? AND read_at IS NOT NULL AND read_at <= \?/);
+  assert.match(repository, /getNotificationReadExpiryCutoff\(now\)/);
+  assert.match(repository, /expiredReadCleanupByAccount/);
+  assert.doesNotMatch(repository, /DELETE FROM (?:medications|dose_records|inventory_events|schedules)/);
+});
+
+test("initialization, app resume, panel opening, and open-panel interval run local expiry cleanup", () => {
+  const provider = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-provider.tsx"), "utf8");
+  assert.match(provider, /cleanupExpiredReadNotificationHistory\(accountUid\)/);
+  assert.match(provider, /void reconcilePresentedNotifications\(\)/);
+  assert.match(provider, /AppState\.addEventListener\("change"/);
+  assert.match(provider, /setInterval\(\(\) => \{/);
+  assert.match(provider, /if \(removedCount > 0\)\s*\{\s*const refreshedPage = await getNotificationHistoryPage\(accountUid, 0/);
+  assert.match(provider, /if \(!isPanelOpen \|\| activeAccountUid !== accountUid/);
+  assert.match(provider, /pendingReadOperations/);
+});
+
+test("read timestamps persist in the existing column without a database migration", () => {
+  const repository = readFileSync(resolve(process.cwd(), "src/notifications/notification-history.repository.ts"), "utf8");
+  const schema = readFileSync(resolve(process.cwd(), "src/database/schema/schema.ts"), "utf8");
+  const database = readFileSync(resolve(process.cwd(), "src/database/database.ts"), "utf8");
+  assert.match(schema, /read_at TEXT/);
+  assert.match(repository, /UPDATE notification_events SET read_at = COALESCE\(read_at, \?\)/);
+  assert.match(repository, /WHERE account_uid = \? AND read_at IS NULL/);
+  assert.doesNotMatch(database, /ALTER TABLE notification_events/);
+});
+
+test("notification card hierarchy uses medication message first and profile detail second", () => {
+  const presentation = formatNotificationPresentation(event({ message: "Maya - Time to take Paracetamol" }), "mother-profile", false);
+  assert.equal(presentation.primaryMessage, "Time to take Paracetamol");
+  assert.equal(presentation.secondaryMessage, "Medication for Mother");
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.match(overlay, /notificationTitle\}\>\{presentation\.primaryMessage\}/);
+  assert.match(overlay, /notificationMessage\}\>\{presentation\.secondaryMessage\}/);
+  assert.match(overlay, /notificationInstruction\}\>\{presentation\.supportingMessage\}/);
+});
+
+test("notification controls keep read/unread views in the panel without marking on open", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.match(overlay, /onPress=\{\(\) => useNotificationCenterStore\.getState\(\)\.openPanel\(\)\}/);
+  assert.match(overlay, /selectedList === "read" \? "← Notifications" : "Already Read"/);
+  assert.match(overlay, /setSelectedList\(selectedList === "read" \? "unread" : "read"\)/);
+  assert.match(overlay, /data=\{visibleEvents\}/);
+  assert.match(overlay, /Mark all \$\{visibleUnreadCount\} notifications as read/);
+  assert.match(overlay, /readSectionButton: \{ minHeight: 48/);
+});
+
+test("the unread check action is account-scoped, accessible, and applies local read state after persistence", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  const provider = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-provider.tsx"), "utf8");
+  const markUpdate = provider.indexOf("await markNotificationAsRead(accountUid, eventId, readAt)");
+  const applyState = provider.indexOf("applyReadState(accountUid, eventId");
+  assert.match(overlay, /accessibilityLabel="Mark notification as read"/);
+  assert.match(overlay, /markReadButton: \{ width: 48, height: 48/);
+  assert.ok(markUpdate >= 0 && applyState > markUpdate);
+  assert.match(provider, /pendingReadOperations\.current\.has\(eventId\)/);
+  assert.match(provider, /markNotificationAsRead\(accountUid, eventId, readAt\)/);
+});
+
+test("notification card copy has no delivery-observation labels and long text can wrap", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.doesNotMatch(overlay, /Observed while app was running|Opened from a system notification|Observed in the system tray/);
+  assert.doesNotMatch(overlay, /numberOfLines=\{[23]\} style=\{styles\.(notificationTitle|notificationMessage|bannerTitle|bannerMessage)\}/);
+  assert.match(overlay, /notificationInstruction: \{ fontSize/);
+});
+
+test("notification empty states contain only the requested short copy and icon", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.match(overlay, /"No notifications yet"/);
+  assert.match(overlay, /"No read notifications"/);
+  assert.doesNotMatch(overlay, /No notification events yet|History includes app-observed events|New medication reminders and low-stock alerts observed on this device/);
+  assert.match(overlay, /emptyState: \{ alignItems: "center"/);
+});
+
+test("read labels use relative time and share one panel clock", () => {
+  const now = Date.parse("2026-11-13T14:34:00.000Z");
+  assert.equal(formatNotificationTimestamp(new Date(now - 5_000).toISOString(), now), "Just now");
+  assert.equal(formatNotificationTimestamp(new Date(now - 40_000).toISOString(), now), "40 sec ago");
+  assert.equal(formatNotificationTimestamp(new Date(now - 5 * 60_000).toISOString(), now), "5 min ago");
+  assert.equal(formatNotificationTimestamp(new Date(now - 2 * 3_600_000).toISOString(), now), "2 hrs ago");
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.match(overlay, /<Text style=\{styles\.readAtLabel\}>Read at:<\/Text>/);
+  assert.match(overlay, /const \[clockNow, setClockNow\] = useState<number \| null>\(null\)/);
+  assert.match(overlay, /setInterval\(updateClock, 30_000\)/);
+});
+
+test("Home and Settings presentation refinements preserve their actions", () => {
+  const home = readFileSync(resolve(process.cwd(), "src/app/(tabs)/index.tsx"), "utf8");
+  const settings = readFileSync(resolve(process.cwd(), "src/app/(tabs)/settings.tsx"), "utf8");
+  assert.doesNotMatch(home, /You&apos;re all caught up|You're all caught up/);
+  assert.match(home, /No more medications scheduled for today\./);
+  assert.match(home, /accessibilityLabel="Add medication" onPress=\{\(\) => router\.push\("\/medications"\)\}/);
+  assert.match(home, /addMedicationTouchTarget: \{ minHeight: 48/);
+  assert.match(home, /addMedicationCapsule: \{[^}]*borderRadius: 999/);
+  assert.doesNotMatch(settings, /Account lifecycle|DEFERRED - BACKEND APPROVAL REQUIRED|Temporarily deactivate account|Permanently delete account/);
+  assert.match(settings, /accessibilityLabel="Sign out"[\s\S]*?logout\(\)/);
+});
+
+test("Home bell is in the logo row above the divider and reserves narrow-screen width", () => {
+  const header = readFileSync(resolve(process.cwd(), "src/components/screen-header.tsx"), "utf8");
+  assert.match(header, /width - homeBrandInset \* 2 - \(rightAccessory \? 56 : 0\)/);
+  assert.match(header, /homeRightAccessory, \{ right: homeBrandInset, top: 0 \}/);
+  assert.match(header, /homeCopy, \{ left: wordmarkStartX, right: rightAccessory \? 72 : 16/);
 });

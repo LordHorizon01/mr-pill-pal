@@ -1,5 +1,5 @@
 import { runDatabaseOperation, runExclusiveDatabaseTransaction } from "@/database/database";
-import { getNotificationEventKey, mergeObservationSources } from "./notification-center.domain";
+import { getNotificationEventKey, getNotificationReadExpiryCutoff, mergeObservationSources } from "./notification-center.domain";
 import {
   NotificationEvent,
   NotificationHistoryPage,
@@ -36,6 +36,7 @@ type ProfileOwnerRow = {
 };
 
 const DEFAULT_PAGE_SIZE = 30;
+const expiredReadCleanupByAccount = new Map<string, Promise<number>>();
 
 function parseSources(value: string): NotificationObservationSource[] {
   try {
@@ -188,6 +189,28 @@ export async function getNotificationHistoryPage(
       totalCount: counts?.total_count ?? 0,
     };
   });
+}
+
+/** Deletes only this account's read history whose read_at is at least 48 hours old. */
+export function cleanupExpiredReadNotificationHistory(accountUid: string, now = Date.now()): Promise<number> {
+  if (!accountUid.trim()) return Promise.resolve(0);
+  const pending = expiredReadCleanupByAccount.get(accountUid);
+  if (pending) return pending;
+
+  const cutoff = getNotificationReadExpiryCutoff(now);
+  let operation: Promise<number>;
+  operation = runDatabaseOperation(async (db) => {
+    const result = await db.runAsync(
+      `DELETE FROM notification_events
+       WHERE account_uid = ? AND read_at IS NOT NULL AND read_at <= ?`,
+      [accountUid, cutoff],
+    );
+    return result.changes;
+  }).finally(() => {
+    if (expiredReadCleanupByAccount.get(accountUid) === operation) expiredReadCleanupByAccount.delete(accountUid);
+  });
+  expiredReadCleanupByAccount.set(accountUid, operation);
+  return operation;
 }
 
 export async function markNotificationAsRead(accountUid: string, eventId: string, readAt = new Date().toISOString()): Promise<void> {

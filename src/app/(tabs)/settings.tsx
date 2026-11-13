@@ -38,16 +38,6 @@ export default function SettingsScreen() {
     <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={() => void logout().catch(() => undefined)} style={({ pressed }) => [styles.signOut, pressed && styles.signOutPressed]}>
       <Text style={styles.signOutText}>Sign out</Text>
     </Pressable>
-    <View style={styles.accountLifecycle}>
-      <Text accessibilityRole="header" style={styles.accountLifecycleTitle}>Account lifecycle</Text>
-      <Text style={styles.accountLifecycleNote}>DEFERRED - BACKEND APPROVAL REQUIRED. These actions are unavailable until a secure server lifecycle can preserve and safely remove account data.</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Temporarily deactivate account - unavailable until backend approval" accessibilityHint="Account deactivation is not available in this version." accessibilityState={{ disabled: true }} disabled style={[styles.accountLifecycleButton, styles.accountDeactivationButton]}>
-        <Text style={[styles.accountLifecycleButtonText, styles.accountDeactivationText]}>Temporarily deactivate account</Text>
-      </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="Permanently delete account - unavailable until backend approval" accessibilityHint="Permanent account deletion is deferred until secure server-side cleanup is approved." accessibilityState={{ disabled: true }} disabled style={[styles.accountLifecycleButton, styles.accountDeletionButton]}>
-        <Text style={[styles.accountLifecycleButtonText, styles.accountDeletionText]}>Permanently delete account</Text>
-      </Pressable>
-    </View>
   </ScrollView></TabContentTransition>;
 }
 
@@ -82,13 +72,4 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   signOut: { alignSelf: "center", minHeight: 48, alignItems: "center", justifyContent: "center", marginTop: 12, paddingHorizontal: 19, paddingVertical: 12, borderRadius: 11, borderWidth: 1, borderColor: colors.danger, backgroundColor: colors.dangerBackground },
   signOutPressed: { opacity: 0.82, backgroundColor: colors.dangerSurface },
   signOutText: { fontSize: 15, lineHeight: 20, fontWeight: "700", color: colors.dangerForeground },
-  accountLifecycle: { alignItems: "center", gap: 9, marginTop: 16, paddingBottom: 12 },
-  accountLifecycleTitle: { alignSelf: "stretch", fontSize: 15, lineHeight: 20, fontWeight: "700", color: colors.textPrimary },
-  accountLifecycleNote: { alignSelf: "stretch", fontSize: 13, lineHeight: 18, color: colors.textSecondary },
-  accountLifecycleButton: { minHeight: 48, maxWidth: "100%", alignSelf: "center", alignItems: "center", justifyContent: "center", paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderRadius: 10, opacity: 0.62 },
-  accountDeactivationButton: { borderColor: colors.warning, backgroundColor: colors.warningSurface },
-  accountDeletionButton: { borderColor: colors.danger, backgroundColor: colors.dangerBackground },
-  accountLifecycleButtonText: { flexShrink: 1, textAlign: "center", fontSize: 14, lineHeight: 19, fontWeight: "600" },
-  accountDeactivationText: { color: colors.warning },
-  accountDeletionText: { color: colors.dangerForeground },
 });

@@ -42,7 +42,7 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
   const [homeCopyHeight, setHomeCopyHeight] = useState(42);
   const [pageTitleHeight, setPageTitleHeight] = useState(28);
   const isHome = variant === "home";
-  const logoWidth = Math.min(logoWidthTarget, Math.max(0, width - homeBrandInset * 2));
+  const logoWidth = Math.min(logoWidthTarget, Math.max(0, width - homeBrandInset * 2 - (rightAccessory ? 56 : 0)));
   const logoHeight = logoWidth / logoVisibleAspectRatio;
   const heading = greeting ?? title;
   const hasRightSlot = Boolean(rightAction || rightAccessory);
@@ -85,7 +85,7 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
             </View>
           </Animated.View>
         </Pressable>
-        {rightAccessory ? <View pointerEvents="box-none" style={[styles.homeRightAccessory, { right: homeBrandInset, top: menuTop }]}>{rightAccessory}</View> : null}
+        {rightAccessory ? <View pointerEvents="box-none" style={[styles.homeRightAccessory, { right: homeBrandInset, top: 0 }]}>{rightAccessory}</View> : null}
         <View
           onLayout={(event) => {
             const height = event.nativeEvent?.layout?.height;

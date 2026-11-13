@@ -24,7 +24,7 @@ import { motion } from "@/components/motion-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
 import { getHomeGreeting } from "@/features/profiles/profile.domain";
-import { StatusBadge, ThemedButton, ThemedChip } from "@/components/themed-ui";
+import { StatusBadge, ThemedChip } from "@/components/themed-ui";
 import { DoseStatusOverflowSheet } from "@/features/doses/dose-status-overflow-sheet";
 import { shouldShowDoseCorrectionOverflow } from "@/features/doses/dose-card-presentation.domain";
 import { AnchoredMenuAnchor } from "@/components/anchored-action-menu.domain";
@@ -307,12 +307,13 @@ export default function HomeScreen() {
             </View> : showFirstScopeSkeleton ? <HomeSummarySkeleton /> : <View style={styles.progressPlaceholder} />}</ContentFade>
             <Text style={styles.sectionTitle}>Next medication</Text>
             {nextDose ? renderDose({ item: nextDose, featured: true }) : hasCurrentDoseContent && visibleDoses.length > 0 ? <View style={styles.caughtUp}>
-              <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
-              <Text style={styles.emptyText}>No more medications scheduled for today.</Text>
+              <Text style={styles.caughtUpText}>No more medications scheduled for today.</Text>
             </View> : null}
             <View style={styles.scheduleHeading}>
               <Text style={styles.sectionTitle}>Today&apos;s schedule</Text>
-              <ThemedButton label="Add medication" tone="outline" size="compact" onPress={() => router.push("/medications")} accessibilityLabel="Add medication" style={styles.quickButton} />
+              <Pressable accessibilityRole="button" accessibilityLabel="Add medication" onPress={() => router.push("/medications")} style={({ pressed }) => [styles.addMedicationTouchTarget, pressed && styles.addMedicationPressed]}>
+                <View pointerEvents="none" style={styles.addMedicationCapsule}><Text style={styles.addMedicationLabel}>Add medication</Text></View>
+              </Pressable>
             </View>
 
             <View style={styles.finalizedFilters}>
@@ -356,9 +357,13 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   progressText: { marginTop: 3, fontSize: 14, color: colors.textSecondary },
   summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 9 },
   summaryText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
-  quickButton: { flexGrow: 0 },
   scheduleHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md, marginBottom: ui.spacing.xs },
-  caughtUp: { paddingVertical: ui.spacing.md },
+  addMedicationTouchTarget: { minHeight: 48, justifyContent: "center", paddingHorizontal: 2 },
+  addMedicationCapsule: { minHeight: 32, justifyContent: "center", alignItems: "center", paddingHorizontal: 11, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 999, backgroundColor: colors.surface },
+  addMedicationLabel: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.outlineForeground },
+  addMedicationPressed: { opacity: 0.72 },
+  caughtUp: { paddingVertical: ui.spacing.sm },
+  caughtUpText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   errorBox: {
     marginBottom: 16,
@@ -407,13 +412,5 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   doseActionPressed: { opacity: 0.82 },
   doseActionDisabled: { opacity: 0.5 },
   emptyContainer: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 20 },
-  emptyTitle: { fontSize: 19, fontWeight: "700", color: colors.textPrimary },
-  emptyText: {
-    marginTop: 8,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-    color: colors.textSecondary,
-  },
   emptyButton: { alignSelf: "center", marginTop: 18 },
 });

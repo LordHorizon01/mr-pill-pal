@@ -1,9 +1,10 @@
-import { type ReactNode, useCallback, useEffect } from "react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import { AppState, View } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useAuthStore } from "@/state/auth.store";
 import { useNotificationCenterStore } from "@/state/notification-center.store";
 import {
+  cleanupExpiredReadNotificationHistory,
   getNotificationHistoryPage,
   markAllNotificationsAsRead,
   markNotificationAsRead,
@@ -26,16 +27,20 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
   const activeAccountUid = useNotificationCenterStore((state) => state.accountUid);
   const isPanelOpen = useNotificationCenterStore((state) => state.isPanelOpen);
   const authenticatedUid = useAuthStore((state) => state.user?.uid ?? null);
+  const pendingReadOperations = useRef(new Set<string>());
+  const markAllReadInProgress = useRef(false);
 
   const isCurrentAccount = useCallback(() =>
     authenticatedUid === accountUid && useAuthStore.getState().user?.uid === accountUid,
   [accountUid, authenticatedUid]);
 
-  const loadFirstPage = useCallback(async () => {
+  const loadFirstPage = useCallback(async (historyAlreadyCleaned = false) => {
     if (!isCurrentAccount()) return;
     const store = useNotificationCenterStore.getState();
     store.setLoading(accountUid, true);
     try {
+      if (!historyAlreadyCleaned) await cleanupExpiredReadNotificationHistory(accountUid);
+      if (!isCurrentAccount()) return;
       const page = await getNotificationHistoryPage(accountUid, 0, HISTORY_PAGE_SIZE);
       if (isCurrentAccount()) useNotificationCenterStore.getState().setHistoryPage(accountUid, page);
     } catch {
@@ -46,9 +51,16 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
   const loadMore = useCallback(async () => {
     const store = useNotificationCenterStore.getState();
     if (!isCurrentAccount() || store.accountUid !== accountUid || store.isLoadingMore || !store.hasMore) return;
-    const offset = store.events.length;
     store.setLoadingMore(accountUid, true);
     try {
+      const removedCount = await cleanupExpiredReadNotificationHistory(accountUid);
+      if (!isCurrentAccount()) return;
+      if (removedCount > 0) {
+        const refreshedPage = await getNotificationHistoryPage(accountUid, 0, HISTORY_PAGE_SIZE);
+        if (isCurrentAccount()) useNotificationCenterStore.getState().setHistoryPage(accountUid, refreshedPage);
+        return;
+      }
+      const offset = useNotificationCenterStore.getState().events.length;
       const page = await getNotificationHistoryPage(accountUid, offset, HISTORY_PAGE_SIZE);
       if (isCurrentAccount()) {
         useNotificationCenterStore.getState().appendHistoryPage(accountUid, page.events);
@@ -60,24 +72,32 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
   }, [accountUid, isCurrentAccount]);
 
   const markRead = useCallback(async (eventId: string) => {
-    if (!isCurrentAccount()) return;
+    if (!isCurrentAccount() || pendingReadOperations.current.has(eventId)) return;
+    pendingReadOperations.current.add(eventId);
     try {
-      await markNotificationAsRead(accountUid, eventId);
-      useNotificationCenterStore.getState().applyReadState(accountUid, eventId, new Date().toISOString());
+      const readAt = new Date().toISOString();
+      await markNotificationAsRead(accountUid, eventId, readAt);
+      useNotificationCenterStore.getState().applyReadState(accountUid, eventId, readAt);
       await loadFirstPage();
     } catch {
       useNotificationCenterStore.getState().setError(accountUid, "This notification could not be marked as read.");
+    } finally {
+      pendingReadOperations.current.delete(eventId);
     }
   }, [accountUid, isCurrentAccount, loadFirstPage]);
 
   const markAllRead = useCallback(async () => {
-    if (!isCurrentAccount()) return;
+    if (!isCurrentAccount() || markAllReadInProgress.current) return;
+    markAllReadInProgress.current = true;
     try {
-      await markAllNotificationsAsRead(accountUid);
-      useNotificationCenterStore.getState().applyAllReadState(accountUid, new Date().toISOString());
+      const readAt = new Date().toISOString();
+      await markAllNotificationsAsRead(accountUid, readAt);
+      useNotificationCenterStore.getState().applyAllReadState(accountUid, readAt);
       await loadFirstPage();
     } catch {
       useNotificationCenterStore.getState().setError(accountUid, "Notifications could not be marked as read.");
+    } finally {
+      markAllReadInProgress.current = false;
     }
   }, [accountUid, isCurrentAccount, loadFirstPage]);
 
@@ -104,9 +124,8 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
       const result = await recordNotificationObservation(accountUid, observation, source);
       if (!result || !current || !isCurrentAccount()) return;
       if (refreshHistory) {
-        const page = await getNotificationHistoryPage(accountUid, 0, HISTORY_PAGE_SIZE);
+        await loadFirstPage();
         if (!current || !isCurrentAccount()) return;
-        useNotificationCenterStore.getState().setHistoryPage(accountUid, page);
       }
       if (showBanner && AppState.currentState === "active") {
         useNotificationCenterStore.getState().enqueueBanner(accountUid, result.event);
@@ -126,6 +145,14 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
 
     const reconcilePresentedNotifications = async () => {
       if (!current || !isCurrentAccount()) return;
+      let cleanupSucceeded = false;
+      try {
+        await cleanupExpiredReadNotificationHistory(accountUid);
+        cleanupSucceeded = true;
+      } catch {
+        useNotificationCenterStore.getState().setError(accountUid, "Expired notifications could not be cleared. Try again.");
+      }
+      if (!current || !isCurrentAccount()) return;
       try {
         const notifications = await Notifications.getPresentedNotificationsAsync();
         for (const notification of notifications) {
@@ -134,7 +161,7 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
       } catch {
         // The on-device history remains available if the system tray cannot be inspected.
       }
-      await loadFirstPage();
+      await loadFirstPage(cleanupSucceeded);
     };
 
     const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
@@ -172,6 +199,18 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
     void loadFirstPage();
   }, [accountUid, activeAccountUid, isPanelOpen, isCurrentAccount, loadFirstPage]);
 
+  useEffect(() => {
+    if (!isPanelOpen || activeAccountUid !== accountUid || !isCurrentAccount()) return;
+    const cleanupInterval = setInterval(() => {
+      void cleanupExpiredReadNotificationHistory(accountUid).then((removedCount) => {
+        if (removedCount > 0 && isCurrentAccount()) void loadFirstPage(true);
+      }).catch(() => {
+        if (isCurrentAccount()) useNotificationCenterStore.getState().setError(accountUid, "Expired notifications could not be cleared. Try again.");
+      });
+    }, 60_000);
+    return () => clearInterval(cleanupInterval);
+  }, [accountUid, activeAccountUid, isPanelOpen, isCurrentAccount, loadFirstPage]);
+
   const canShow = activeAccountUid === accountUid && authenticatedUid === accountUid;
   return <View style={{ flex: 1 }}>
     {children}
@@ -180,8 +219,8 @@ export function NotificationCenterProvider({ accountUid, bannerTopInset = 0, chi
       bannerTopInset={bannerTopInset}
       onReload={() => void loadFirstPage()}
       onLoadMore={() => void loadMore()}
-      onMarkRead={(event: NotificationEvent) => void markRead(event.id)}
-      onMarkAllRead={() => void markAllRead()}
+      onMarkRead={(event: NotificationEvent) => markRead(event.id)}
+      onMarkAllRead={markAllRead}
     /> : null}
   </View>;
 }
