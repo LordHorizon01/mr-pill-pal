@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { getAuthFormLayout } from "../src/features/auth/auth-form-layout.domain";
 
 const authGate = readFileSync("src/components/auth-gate.tsx", "utf8");
 const setupWizard = readFileSync("src/components/profile-setup-wizard.tsx", "utf8");
+const authFormLayout = readFileSync("src/features/auth/auth-form-layout.domain.ts", "utf8");
 const passwordFieldStart = authGate.indexOf("function PasswordField(");
 const passwordFieldEnd = authGate.indexOf("\nfunction Message(", passwordFieldStart);
 const passwordField = authGate.slice(passwordFieldStart, passwordFieldEnd);
@@ -59,6 +61,34 @@ test("authentication landing copy is clean and Email is capitalized without chan
 
 test("email Back is an outlined accessible secondary control and clears form-only state", () => {
   assert.match(authGate, /accessibilityLabel="Back to authentication choices"/);
-  assert.match(authGate, /back:\{minWidth:48,minHeight:48[^}]*paddingHorizontal:12,borderWidth:1,borderRadius:9/);
+  assert.match(authGate, /hitSlop=\{8\} onPress=\{onBack\} style=\{\[authStyles\.back/);
+  assert.match(authGate, /height:layout\.backHeight,minHeight:layout\.backHeight,paddingHorizontal:13,borderColor:c\.border,backgroundColor:c\.surface/);
+  assert.match(authGate, /back:\{minWidth:48,justifyContent:"center",alignItems:"center",alignSelf:"flex-start",paddingHorizontal:12,borderWidth:1,borderRadius:9\}/);
+  assert.doesNotMatch(authGate, /back:\{[^}]*minHeight:48/);
+  assert.match(authFormLayout, /backHeight:\s*32/);
   assert.match(authGate, /setAuthFormOpen\(false\); setMessage\(null\); setPassword\(""\); setConfirmPassword\(""\)/);
+});
+
+test("authentication layout compacts for a standard phone and preserves larger-font scrolling", () => {
+  const phone = getAuthFormLayout(824, false, 1);
+  assert.equal(phone.compact, true);
+  assert.equal(phone.backHeight, 32);
+  assert.equal(phone.illustrationWidth, 172);
+  assert.equal(phone.illustrationHeight, 118);
+  assert.equal(phone.cardPadding, 14);
+
+  const largeScreen = getAuthFormLayout(900, false, 1);
+  assert.equal(largeScreen.compact, false);
+  assert.equal(largeScreen.backHeight, 32);
+
+  const keyboard = getAuthFormLayout(420, true, 1);
+  assert.equal(keyboard.compact, true);
+  assert.ok(keyboard.illustrationHeight <= 94);
+  assert.equal(keyboard.verticalPadding, 4);
+
+  const largeText = getAuthFormLayout(900, false, 1.4);
+  assert.equal(largeText.compact, true);
+  assert.match(authGate, /<ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle=\{\[authStyles\.formScroll/);
+  assert.match(authGate, /Keyboard\.addListener\(Platform\.OS==="ios"\?"keyboardWillShow":"keyboardDidShow"/);
+  assert.match(authGate, /keyboardDidHide/);
 });

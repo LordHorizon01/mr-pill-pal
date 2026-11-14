@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mr-pill-pal",
+    "name": "Mr. Pill Pal",
     "slug": "mr-pill-pal",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,11 +11,11 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
-      "icon": "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master - 1024 x 1024.png",
+      "icon": "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master-inset-10-1024.png",
       "adaptiveIcon": {
         "backgroundColor": "#FAF3E8",
-        "foregroundImage": "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground+backround - 1024 x 1024.png",
-        "monochromeImage": "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon - 1024 x 1024.png"
+        "foregroundImage": "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground-inset-10-1024.png",
+        "monochromeImage": "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon-inset-10-1024.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.mrpillpal",

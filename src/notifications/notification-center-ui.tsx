@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -20,6 +20,7 @@ import { useProfileStore } from "@/state/profile.store";
 import { useSettingsStore } from "@/state/settings.store";
 import { formatNotificationPresentation, formatNotificationTimestamp, getUnreadBadgeLabel } from "./notification-center.domain";
 import { getNotificationPanelLayout } from "./notification-center-layout.domain";
+import type { NotificationPanelAnchor } from "./notification-center-layout.domain";
 import { NotificationEvent } from "./notification-center.types";
 
 type OverlayProps = {
@@ -34,6 +35,7 @@ type OverlayProps = {
 type NotificationList = "unread" | "read";
 
 export function NotificationBellButton() {
+  const anchorRef = useRef<View>(null);
   const { colors } = useAppTheme();
   const userUid = useAuthStore((state) => state.user?.uid ?? null);
   const activeAccountUid = useNotificationCenterStore((state) => state.accountUid);
@@ -42,22 +44,34 @@ export function NotificationBellButton() {
   const badgeLabel = activeAccountUid === userUid ? getUnreadBadgeLabel(unreadCount) : null;
   const styles = createStyles(colors);
 
-  return <Pressable
-    accessibilityRole="button"
-    accessibilityLabel={badgeLabel ? `Open notifications, ${badgeLabel} unread` : "Open notifications"}
-    accessibilityHint="Opens recent notification history"
-    accessibilityState={{ expanded: isPanelOpen }}
-    onPress={() => useNotificationCenterStore.getState().openPanel()}
-    style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}
-  >
-    <SymbolView
-      accessibilityElementsHidden
-      name={{ ios: "bell", android: "notifications", web: "notifications" }}
-      size={23}
-      tintColor={colors.primary}
-    />
-    {badgeLabel ? <View accessible={false} style={styles.bellBadge}><Text style={styles.bellBadgeText}>{badgeLabel}</Text></View> : null}
-  </Pressable>;
+  return <View ref={anchorRef} collapsable={false}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={badgeLabel ? `Open notifications, ${badgeLabel} unread` : "Open notifications"}
+      accessibilityHint="Opens recent notification history"
+      accessibilityState={{ expanded: isPanelOpen }}
+      onPress={() => {
+        const openPanel = useNotificationCenterStore.getState().openPanel;
+        if (!anchorRef.current) {
+          openPanel(null);
+          return;
+        }
+        anchorRef.current.measureInWindow((x, y, width, height) => {
+          const anchor: NotificationPanelAnchor | null = width > 0 && height > 0 ? { x, y, width, height } : null;
+          openPanel(anchor);
+        });
+      }}
+      style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}
+    >
+      <SymbolView
+        accessibilityElementsHidden
+        name={{ ios: "bell", android: "notifications", web: "notifications" }}
+        size={23}
+        tintColor={colors.primary}
+      />
+      {badgeLabel ? <View accessible={false} style={styles.bellBadge}><Text style={styles.bellBadgeText}>{badgeLabel}</Text></View> : null}
+    </Pressable>
+  </View>;
 }
 
 export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload, onLoadMore, onMarkRead, onMarkAllRead }: OverlayProps) {
@@ -68,6 +82,7 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
   const userUid = useAuthStore((state) => state.user?.uid ?? null);
   const activeAccountUid = useNotificationCenterStore((state) => state.accountUid);
   const isPanelOpen = useNotificationCenterStore((state) => state.isPanelOpen);
+  const panelAnchor = useNotificationCenterStore((state) => state.panelAnchor);
   const events = useNotificationCenterStore((state) => state.events);
   const unreadCount = useNotificationCenterStore((state) => state.unreadCount);
   const totalCount = useNotificationCenterStore((state) => state.totalCount);
@@ -91,7 +106,7 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
   const visibleBanner = activeAccountUid === accountUid && userUid === accountUid && currentBanner?.accountUid === accountUid
     ? currentBanner
     : null;
-  const panelLayout = getNotificationPanelLayout(width, height, insets.top, insets.bottom);
+  const panelLayout = getNotificationPanelLayout(width, height, insets, panelAnchor);
   const bannerPresentation = visibleBanner
     ? formatNotificationPresentation(visibleBanner, selectedProfileId, hideMedicationName)
     : null;
@@ -166,8 +181,8 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
     >
       <View style={styles.modalRoot}>
         <Pressable accessibilityRole="button" accessibilityLabel="Close notifications" onPress={closePanel} style={[StyleSheet.absoluteFill, styles.scrim]} />
-        <View pointerEvents="box-none" style={[styles.panelPlacement, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 12 }]}>
-          <View style={[styles.panel, { maxHeight: panelLayout.maxHeight, minHeight: panelMinHeight, width: panelLayout.width }]}>
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+          <View style={[styles.panel, styles.positionedPanel, { top: panelLayout.top, left: panelLayout.left, maxHeight: panelLayout.maxHeight, minHeight: panelMinHeight, width: panelLayout.width }]}>
             <View style={styles.panelHeader}>
               <View style={styles.panelHeaderCopy}>
                 <Text accessibilityRole="header" style={styles.panelTitle}>Notifications</Text>
@@ -175,7 +190,7 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={selectedList === "read" ? "Return to unread notifications" : `Show ${readCount} already read notifications`}
+                accessibilityLabel={selectedList === "read" ? "Return to unread notifications" : `Show ${readCount} read notifications`}
                 accessibilityState={{ selected: selectedList === "read" }}
                 onPress={() => setSelectedList((current) => current === "read" ? "unread" : "read")}
                 style={({ pressed }) => [styles.readSectionTouchTarget, pressed && styles.actionPressed]}
@@ -189,7 +204,7 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
                       <SymbolView accessibilityElementsHidden name={{ ios: "checkmark", android: "check", web: "check" }} size={12} tintColor={colors.primary} />
                       <SymbolView accessibilityElementsHidden style={styles.overlappedCheckIcon} name={{ ios: "checkmark", android: "check", web: "check" }} size={12} tintColor={colors.primary} />
                     </View>
-                    <Text style={styles.readSectionButtonText}>Already Read</Text>
+                    <Text style={styles.readSectionButtonText}>Read</Text>
                   </>}
                 </View>
               </Pressable>
@@ -307,17 +322,17 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   bellBadgeText: { color: colors.onPrimary, fontSize: 9, lineHeight: 12, fontWeight: "800", fontVariant: ["tabular-nums"] },
   modalRoot: { flex: 1 },
   scrim: { backgroundColor: `${colors.scrim}66` },
-  panelPlacement: { flex: 1, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
+  positionedPanel: { position: "absolute" },
   panel: { flexShrink: 1, borderRadius: 18, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, boxShadow: "0 10px 30px rgba(0, 0, 0, 0.22)" },
   panelHeader: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 13, paddingRight: 6 },
   panelHeaderCopy: { flex: 1, minWidth: 0 },
-  panelTitle: { fontSize: 19, lineHeight: 25, fontWeight: "700", color: colors.textPrimary },
+  panelTitle: { fontSize: 18, lineHeight: 24, fontWeight: "700", color: colors.textPrimary },
   panelCount: { marginTop: 1, fontSize: 12.5, lineHeight: 17, color: colors.textSecondary },
   closeButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   readSectionTouchTarget: { minWidth: 44, minHeight: 48, alignItems: "center", justifyContent: "center" },
-  readSectionCapsule: { minHeight: 32, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 8, borderRadius: ui.radius.chip, borderWidth: 1, borderColor: colors.outlineBorder, backgroundColor: colors.surface },
+  readSectionCapsule: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3, paddingHorizontal: 7, borderRadius: ui.radius.chip, borderWidth: 1, borderColor: colors.outlineBorder, backgroundColor: colors.surface },
   readSectionCapsuleSelected: { backgroundColor: colors.surfaceSubtle },
-  readSectionButtonText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17, fontWeight: "700" },
+  readSectionButtonText: { color: colors.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "700" },
   readSectionButtonTextSelected: { color: colors.primary },
   doubleCheckIcon: { flexDirection: "row", alignItems: "center" },
   overlappedCheckIcon: { marginLeft: -6 },

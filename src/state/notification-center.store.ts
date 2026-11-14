@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { NotificationEvent, NotificationHistoryPage } from "@/notifications/notification-center.types";
+import type { NotificationPanelAnchor } from "@/notifications/notification-center-layout.domain";
 
 type NotificationCenterState = {
   accountUid: string | null;
@@ -11,6 +12,7 @@ type NotificationCenterState = {
   isLoadingMore: boolean;
   error: string | null;
   isPanelOpen: boolean;
+  panelAnchor: NotificationPanelAnchor | null;
   currentBanner: NotificationEvent | null;
   queuedBanners: NotificationEvent[];
   seenBannerIds: string[];
@@ -23,7 +25,7 @@ type NotificationCenterState = {
   setError: (accountUid: string, error: string | null) => void;
   applyReadState: (accountUid: string, eventId: string, readAt: string) => void;
   applyAllReadState: (accountUid: string, readAt: string) => void;
-  openPanel: () => void;
+  openPanel: (anchor: NotificationPanelAnchor | null) => void;
   closePanel: () => void;
   enqueueBanner: (accountUid: string, event: NotificationEvent) => void;
   dismissCurrentBanner: (accountUid: string) => void;
@@ -38,6 +40,7 @@ const initialAccountState = {
   isLoadingMore: false,
   error: null as string | null,
   isPanelOpen: false,
+  panelAnchor: null as NotificationPanelAnchor | null,
   currentBanner: null as NotificationEvent | null,
   queuedBanners: [] as NotificationEvent[],
   seenBannerIds: [] as string[],
@@ -87,8 +90,8 @@ export const useNotificationCenterStore = create<NotificationCenterState>((set, 
     if (state.accountUid !== accountUid) return;
     set({ events: state.events.map((event) => event.readAt ? event : { ...event, readAt }), unreadCount: 0 });
   },
-  openPanel: () => set({ isPanelOpen: true }),
-  closePanel: () => set({ isPanelOpen: false }),
+  openPanel: (panelAnchor) => set({ isPanelOpen: true, panelAnchor }),
+  closePanel: () => set({ isPanelOpen: false, panelAnchor: null }),
   enqueueBanner: (accountUid, event) => {
     if (get().accountUid !== accountUid || event.accountUid !== accountUid) return;
     const { currentBanner, queuedBanners, seenBannerIds } = get();

@@ -271,14 +271,17 @@ test("notification card hierarchy uses medication message first and profile deta
 
 test("notification controls keep read/unread views in the panel without marking on open", () => {
   const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
-  assert.match(overlay, /onPress=\{\(\) => useNotificationCenterStore\.getState\(\)\.openPanel\(\)\}/);
+  assert.match(overlay, /measureInWindow\(\(x, y, width, height\) =>/);
+  assert.match(overlay, /openPanel\(anchor\)/);
   assert.match(overlay, /setSelectedList\(\(current\) => current === "read" \? "unread" : "read"\)/);
   assert.match(overlay, /<Text style=\{\[styles\.readSectionButtonText, styles\.readSectionButtonTextSelected\]\}>Notifications<\/Text>/);
-  assert.match(overlay, /<Text style=\{styles\.readSectionButtonText\}>Already Read<\/Text>/);
+  assert.match(overlay, /<Text style=\{styles\.readSectionButtonText\}>Read<\/Text>/);
+  assert.match(overlay, /Show \$\{readCount\} read notifications/);
   assert.match(overlay, /data=\{visibleEvents\}/);
   assert.match(overlay, /Mark all \$\{visibleUnreadCount\} notifications as read/);
   assert.match(overlay, /readSectionTouchTarget: \{ minWidth: 44, minHeight: 48/);
-  assert.match(overlay, /readSectionCapsule: \{ minHeight: 32, flexDirection: "row"/);
+  assert.match(overlay, /readSectionCapsule: \{ minHeight: 30, flexDirection: "row"/);
+  assert.match(overlay, /readSectionButtonText: \{ color: colors\.textSecondary, fontSize: 12,/);
   assert.match(overlay, /<View accessible=\{false\} style=\{styles\.doubleCheckIcon\}>/);
   assert.doesNotMatch(overlay, /panelActions/);
   assert.match(overlay, /onRequestClose=\{closePanel\}/);
@@ -314,26 +317,39 @@ test("notification empty states contain only the requested short copy and icon",
   assert.match(overlay, /emptyNotificationList: \{ flex: 1/);
 });
 
-test("notification panel layout stays portrait-oriented, safe-area centered, and responsive", () => {
-  const regular = getNotificationPanelLayout(390, 844, 24, 24);
+test("notification panel anchors to its bell, clamps to safe areas, and remains portrait-oriented", () => {
+  const regular = getNotificationPanelLayout(390, 844, { top: 24, right: 0, bottom: 24, left: 0 }, { x: 318, y: 48, width: 48, height: 48 });
   assert.equal(regular.width, 328);
   assert.equal(regular.emptyMinHeight, 370);
   assert.ok(regular.emptyMinHeight > regular.width);
-  assert.ok(regular.maxHeight / (844 - 24 - 24 - 22) >= 0.70);
-  assert.ok(regular.maxHeight / (844 - 24 - 24 - 22) <= 0.75);
+  assert.equal(regular.left, 38);
+  assert.equal(regular.top, 104);
+  assert.equal(regular.opensAbove, false);
+  assert.ok(regular.top >= 32);
+  assert.ok(regular.top + regular.maxHeight <= 808);
+  assert.ok(regular.left >= 16);
+  assert.ok(regular.left + regular.width <= 374);
 
-  const narrow = getNotificationPanelLayout(320, 568, 24, 24);
+  const narrow = getNotificationPanelLayout(320, 568, { top: 24, right: 0, bottom: 24, left: 0 }, { x: 256, y: 48, width: 48, height: 48 });
   assert.equal(narrow.width, 288);
-  assert.equal(narrow.emptyMinHeight, narrow.maxHeight);
+  assert.equal(narrow.left, 16);
+  assert.ok(narrow.left + narrow.width <= 304);
+  assert.ok(narrow.top + narrow.maxHeight <= 544);
+
+  const nearBottom = getNotificationPanelLayout(390, 844, { top: 24, right: 0, bottom: 24, left: 0 }, { x: 318, y: 700, width: 48, height: 48 });
+  assert.equal(nearBottom.opensAbove, true);
+  assert.ok(nearBottom.top >= 32);
+  assert.ok(nearBottom.top + nearBottom.maxHeight <= 808);
 
   const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
-  assert.match(overlay, /getNotificationPanelLayout\(width, height, insets\.top, insets\.bottom\)/);
-  assert.match(overlay, /panelPlacement: \{ flex: 1, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" \}/);
-  assert.match(overlay, /paddingTop: insets\.top \+ 10, paddingBottom: insets\.bottom \+ 12/);
+  assert.match(overlay, /getNotificationPanelLayout\(width, height, insets, panelAnchor\)/);
+  assert.match(overlay, /styles\.positionedPanel, \{ top: panelLayout\.top, left: panelLayout\.left/);
+  assert.match(overlay, /positionedPanel: \{ position: "absolute" \}/);
+  assert.doesNotMatch(overlay, /justifyContent: "center"\s*,\s*alignItems: "center"/);
   assert.match(overlay, /minHeight: panelMinHeight/);
 });
 
-test("Already Read is in the header before Close and Mark all as read is a conditional list action", () => {
+test("Read is in the header before Close and Mark all as read is a conditional list action", () => {
   const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
   const headerStart = overlay.indexOf("<View style={styles.panelHeader}>");
   const errorStart = overlay.indexOf("{error ? <View style={styles.errorBox}>", headerStart);
@@ -361,12 +377,14 @@ test("notification history scroll, read timestamps, profile copy, and pill banne
 
 test("Android launcher and medication notification icons use existing branded runtime assets", () => {
   const expo = JSON.parse(readFileSync(resolve(process.cwd(), "app.json"), "utf8")).expo;
-  const launcherIcon = "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master - 1024 x 1024.png";
-  const adaptiveForeground = "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground+backround - 1024 x 1024.png";
-  const monochromeIcon = "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon - 1024 x 1024.png";
+  const launcherIcon = "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master-inset-10-1024.png";
+  const adaptiveForeground = "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground-inset-10-1024.png";
+  const monochromeIcon = "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon-inset-10-1024.png";
   const notificationIcon = "./assets/brand/runtime/android/notification/mpp-notification-icon-white-96x96.png";
   const notificationPlugin = expo.plugins.find((plugin: unknown) => Array.isArray(plugin) && plugin[0] === "expo-notifications");
 
+  assert.equal(expo.name, "Mr. Pill Pal");
+  assert.equal(expo.slug, "mr-pill-pal");
   assert.equal(expo.android.package, "com.anonymous.mrpillpal");
   assert.equal(expo.android.icon, launcherIcon);
   assert.equal(expo.android.adaptiveIcon.foregroundImage, adaptiveForeground);
@@ -379,6 +397,12 @@ test("Android launcher and medication notification icons use existing branded ru
 
   for (const path of [launcherIcon, adaptiveForeground, monochromeIcon, notificationIcon]) {
     assert.equal(existsSync(resolve(process.cwd(), path)), true, `missing configured icon: ${path}`);
+  }
+
+  for (const path of [launcherIcon, adaptiveForeground, monochromeIcon]) {
+    const image = readFileSync(resolve(process.cwd(), path));
+    assert.equal(image.readUInt32BE(16), 1024);
+    assert.equal(image.readUInt32BE(20), 1024);
   }
 
   const iconBuffer = readFileSync(resolve(process.cwd(), notificationIcon));
