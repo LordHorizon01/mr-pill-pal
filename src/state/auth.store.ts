@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { AuthUser, logTransientAccountStateCleared, observeAuthState, reloadCurrentUser, requiresEmailVerification, signOutCurrentAccount, signOutUnverifiedUser, toAuthMessage } from "@/features/auth/auth.service";
+import { resolveIdentityStartupPhase } from "@/features/auth/offline-startup.domain";
 
 export type AuthPhase = "loading" | "configuration_required" | "unauthenticated" | "verification_required" | "profile_setup_required" | "authenticated";
 
@@ -9,7 +10,9 @@ type AuthState = {
   clearError: () => void; logout: () => Promise<void>; reset: () => void;
 };
 
-function phaseFor(user: AuthUser | null): AuthPhase { return !user ? "unauthenticated" : requiresEmailVerification(user) ? "verification_required" : "profile_setup_required"; }
+function phaseFor(user: AuthUser | null): AuthPhase {
+  return resolveIdentityStartupPhase(Boolean(user), Boolean(user && requiresEmailVerification(user)));
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   phase: "loading", user: null, error: null, initialized: false,

@@ -49,3 +49,16 @@ test("profile restoration loader is one safe-area-centered group with centered c
   assert.match(setupWizard, /waitingText:\{flexShrink:1,textAlign:"center"/);
   assert.match(setupWizard, /<ActivityIndicator size="large"[\s\S]*?<Text style=\{\[s\.waitingText/);
 });
+
+test("authentication landing copy is clean and Email is capitalized without changing routes", () => {
+  assert.doesNotMatch(authGate, /Private by design\s*[•·]\s*Core features work offline/);
+  assert.match(authGate, /label="Continue with Email"/);
+  assert.doesNotMatch(authGate, /label="Continue with email"/);
+  assert.match(authGate, /onEmail=\{\(\) => \{ setIsRegistering\(true\); setAuthFormOpen\(true\); setMessage\(null\); \}\}/);
+});
+
+test("email Back is an outlined accessible secondary control and clears form-only state", () => {
+  assert.match(authGate, /accessibilityLabel="Back to authentication choices"/);
+  assert.match(authGate, /back:\{minWidth:48,minHeight:48[^}]*paddingHorizontal:12,borderWidth:1,borderRadius:9/);
+  assert.match(authGate, /setAuthFormOpen\(false\); setMessage\(null\); setPassword\(""\); setConfirmPassword\(""\)/);
+});

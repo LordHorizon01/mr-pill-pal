@@ -4,6 +4,20 @@ import type { Profile } from "../profiles/profile.types";
 export type OfflineStartupProfile = Pick<Profile, "id" | "accountUid" | "isActive" | "updatedAt"> &
   Partial<Pick<Profile, "deletedAt">>;
 
+export type IdentityStartupPhase = "loading" | "unauthenticated" | "verification_required";
+
+/**
+ * A verified Firebase identity is not yet proof that this account needs first-profile setup.
+ * Keep the destination unresolved until the account-scoped local setup gate has been read.
+ */
+export function resolveIdentityStartupPhase(
+  hasAuthenticatedUser: boolean,
+  requiresVerification: boolean,
+): IdentityStartupPhase {
+  if (!hasAuthenticatedUser) return "unauthenticated";
+  return requiresVerification ? "verification_required" : "loading";
+}
+
 export function resolveLocalProfileSetupState(
   cachedState: AccountProfileSetupState | null,
   hasAccountProfile: boolean,

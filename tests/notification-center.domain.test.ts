@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import {
@@ -14,6 +14,7 @@ import {
 } from "../src/notifications/notification-center.domain";
 import { NotificationEvent, NotificationObservation } from "../src/notifications/notification-center.types";
 import { CREATE_NOTIFICATION_EVENTS_TABLE } from "../src/database/schema/schema";
+import { getNotificationPanelLayout } from "../src/notifications/notification-center-layout.domain";
 
 const accountUid = "account-a";
 const observation: NotificationObservation = {
@@ -271,11 +272,17 @@ test("notification card hierarchy uses medication message first and profile deta
 test("notification controls keep read/unread views in the panel without marking on open", () => {
   const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
   assert.match(overlay, /onPress=\{\(\) => useNotificationCenterStore\.getState\(\)\.openPanel\(\)\}/);
-  assert.match(overlay, /selectedList === "read" \? "← Notifications" : "Already Read"/);
-  assert.match(overlay, /setSelectedList\(selectedList === "read" \? "unread" : "read"\)/);
+  assert.match(overlay, /setSelectedList\(\(current\) => current === "read" \? "unread" : "read"\)/);
+  assert.match(overlay, /<Text style=\{\[styles\.readSectionButtonText, styles\.readSectionButtonTextSelected\]\}>Notifications<\/Text>/);
+  assert.match(overlay, /<Text style=\{styles\.readSectionButtonText\}>Already Read<\/Text>/);
   assert.match(overlay, /data=\{visibleEvents\}/);
   assert.match(overlay, /Mark all \$\{visibleUnreadCount\} notifications as read/);
-  assert.match(overlay, /readSectionButton: \{ minHeight: 48/);
+  assert.match(overlay, /readSectionTouchTarget: \{ minWidth: 44, minHeight: 48/);
+  assert.match(overlay, /readSectionCapsule: \{ minHeight: 32, flexDirection: "row"/);
+  assert.match(overlay, /<View accessible=\{false\} style=\{styles\.doubleCheckIcon\}>/);
+  assert.doesNotMatch(overlay, /panelActions/);
+  assert.match(overlay, /onRequestClose=\{closePanel\}/);
+  assert.match(overlay, /accessibilityLabel="Close notifications" onPress=\{closePanel\}/);
 });
 
 test("the unread check action is account-scoped, accessible, and applies local read state after persistence", () => {
@@ -303,6 +310,82 @@ test("notification empty states contain only the requested short copy and icon",
   assert.match(overlay, /"No read notifications"/);
   assert.doesNotMatch(overlay, /No notification events yet|History includes app-observed events|New medication reminders and low-stock alerts observed on this device/);
   assert.match(overlay, /emptyState: \{ alignItems: "center"/);
+  assert.match(overlay, /emptyListContent: \{ flexGrow: 1, alignItems: "stretch", justifyContent: "center"/);
+  assert.match(overlay, /emptyNotificationList: \{ flex: 1/);
+});
+
+test("notification panel layout stays portrait-oriented, safe-area centered, and responsive", () => {
+  const regular = getNotificationPanelLayout(390, 844, 24, 24);
+  assert.equal(regular.width, 328);
+  assert.equal(regular.emptyMinHeight, 370);
+  assert.ok(regular.emptyMinHeight > regular.width);
+  assert.ok(regular.maxHeight / (844 - 24 - 24 - 22) >= 0.70);
+  assert.ok(regular.maxHeight / (844 - 24 - 24 - 22) <= 0.75);
+
+  const narrow = getNotificationPanelLayout(320, 568, 24, 24);
+  assert.equal(narrow.width, 288);
+  assert.equal(narrow.emptyMinHeight, narrow.maxHeight);
+
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  assert.match(overlay, /getNotificationPanelLayout\(width, height, insets\.top, insets\.bottom\)/);
+  assert.match(overlay, /panelPlacement: \{ flex: 1, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" \}/);
+  assert.match(overlay, /paddingTop: insets\.top \+ 10, paddingBottom: insets\.bottom \+ 12/);
+  assert.match(overlay, /minHeight: panelMinHeight/);
+});
+
+test("Already Read is in the header before Close and Mark all as read is a conditional list action", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  const headerStart = overlay.indexOf("<View style={styles.panelHeader}>");
+  const errorStart = overlay.indexOf("{error ? <View style={styles.errorBox}>", headerStart);
+  const header = overlay.slice(headerStart, errorStart);
+  assert.ok(header.indexOf("readSectionTouchTarget") >= 0);
+  assert.ok(header.indexOf("closeButton") > header.indexOf("readSectionTouchTarget"));
+  assert.match(overlay, /ListHeaderComponent=\{selectedList === "unread" && visibleUnreadCount > 0/);
+  assert.match(overlay, /Mark all as read/);
+  assert.doesNotMatch(header, /Mark all as read/);
+  assert.match(overlay, /style=\{showCenteredEmptyList \? styles\.emptyNotificationList/);
+});
+
+test("notification history scroll, read timestamps, profile copy, and pill banner icon are preserved", () => {
+  const overlay = readFileSync(resolve(process.cwd(), "src/notifications/notification-center-ui.tsx"), "utf8");
+  const historyItemStart = overlay.indexOf("function NotificationHistoryItem(");
+  const stylesStart = overlay.indexOf("\nconst createStyles", historyItemStart);
+  const historyItem = overlay.slice(historyItemStart, stylesStart);
+  assert.match(overlay, /<FlatList/);
+  assert.match(overlay, /onEndReached=\{\(\) => \{ if \(hasMore && !isLoadingMore\) onLoadMore\(\); \}\}/);
+  assert.doesNotMatch(historyItem, /numberOfLines=/);
+  assert.match(overlay, /presentation\.supportingMessage/);
+  assert.match(overlay, /event\.readAt \? <><Text style=\{styles\.readAtLabel\}>Read at:<\/Text>/);
+  assert.match(overlay, /ios: "pills\.fill", android: "medication", web: "medication"/);
+});
+
+test("Android launcher and medication notification icons use existing branded runtime assets", () => {
+  const expo = JSON.parse(readFileSync(resolve(process.cwd(), "app.json"), "utf8")).expo;
+  const launcherIcon = "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master - 1024 x 1024.png";
+  const adaptiveForeground = "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground+backround - 1024 x 1024.png";
+  const monochromeIcon = "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon - 1024 x 1024.png";
+  const notificationIcon = "./assets/brand/runtime/android/notification/mpp-notification-icon-white-96x96.png";
+  const notificationPlugin = expo.plugins.find((plugin: unknown) => Array.isArray(plugin) && plugin[0] === "expo-notifications");
+
+  assert.equal(expo.android.package, "com.anonymous.mrpillpal");
+  assert.equal(expo.android.icon, launcherIcon);
+  assert.equal(expo.android.adaptiveIcon.foregroundImage, adaptiveForeground);
+  assert.equal(expo.android.adaptiveIcon.monochromeImage, monochromeIcon);
+  assert.equal(expo.android.adaptiveIcon.backgroundColor, "#FAF3E8");
+  assert.equal(notificationPlugin?.[1]?.icon, notificationIcon);
+  assert.equal(notificationPlugin?.[1]?.color, "#0A5A54");
+  assert.equal(expo.ios.icon, "./assets/expo.icon");
+  assert.equal(expo.icon, "./assets/images/icon.png");
+
+  for (const path of [launcherIcon, adaptiveForeground, monochromeIcon, notificationIcon]) {
+    assert.equal(existsSync(resolve(process.cwd(), path)), true, `missing configured icon: ${path}`);
+  }
+
+  const iconBuffer = readFileSync(resolve(process.cwd(), notificationIcon));
+  assert.equal(iconBuffer.readUInt32BE(16), 96);
+  assert.equal(iconBuffer.readUInt32BE(20), 96);
+  const service = readFileSync(resolve(process.cwd(), "src/notifications/notification.service.ts"), "utf8");
+  assert.match(service, /MEDICATION_CHANNEL_ID = "medication-reminders-v3"/);
 });
 
 test("read labels use relative time and share one panel clock", () => {
@@ -319,10 +402,13 @@ test("read labels use relative time and share one panel clock", () => {
 
 test("Home and Settings presentation refinements preserve their actions", () => {
   const home = readFileSync(resolve(process.cwd(), "src/app/(tabs)/index.tsx"), "utf8");
+  const homeEmptyState = readFileSync(resolve(process.cwd(), "src/features/doses/home-empty-state.domain.ts"), "utf8");
   const settings = readFileSync(resolve(process.cwd(), "src/app/(tabs)/settings.tsx"), "utf8");
   assert.doesNotMatch(home, /You&apos;re all caught up|You're all caught up/);
-  assert.match(home, /No more medications scheduled for today\./);
+  assert.match(homeEmptyState, /No more medications scheduled for today\./);
+  assert.match(home, /getNextDoseEmptyMessage\(/);
   assert.match(home, /accessibilityLabel="Add medication" onPress=\{\(\) => router\.push\("\/medications"\)\}/);
+  assert.match(home, /name=\{\{ ios: "plus", android: "add", web: "add" \}\}/);
   assert.match(home, /addMedicationTouchTarget: \{ minHeight: 48/);
   assert.match(home, /addMedicationCapsule: \{[^}]*borderRadius: 999/);
   assert.doesNotMatch(settings, /Account lifecycle|DEFERRED - BACKEND APPROVAL REQUIRED|Temporarily deactivate account|Permanently delete account/);

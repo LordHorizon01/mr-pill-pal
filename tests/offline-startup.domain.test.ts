@@ -9,6 +9,7 @@ import {
   isOfflineStartupFailure,
   isNetworkUnreachable,
   mergeRemoteProfilesSafely,
+  resolveIdentityStartupPhase,
   resolveLocalProfileSetupState,
   restoreSelectedProfile,
   withStartupTimeout,
@@ -27,6 +28,28 @@ const profile = (id: string, accountUid = "account-a", updatedAt = "2026-10-20T1
   accountUid,
   isActive: true,
   updatedAt,
+});
+
+test("a verified Firebase identity remains unresolved until its local setup gate is restored", () => {
+  assert.equal(resolveIdentityStartupPhase(false, false), "unauthenticated");
+  assert.equal(resolveIdentityStartupPhase(true, true), "verification_required");
+  assert.equal(resolveIdentityStartupPhase(true, false), "loading");
+  assert.equal(resolveLocalProfileSetupState("COMPLETED", true), "COMPLETED");
+  assert.equal(resolveLocalProfileSetupState("NOT_STARTED", false), "NOT_STARTED");
+});
+
+test("root startup renders destinations only after account-scoped local setup restoration", () => {
+  const authStore = readFileSync("src/state/auth.store.ts", "utf8");
+  const rootLayout = readFileSync("src/app/_layout.tsx", "utf8");
+  assert.match(authStore, /resolveIdentityStartupPhase\(Boolean\(user\), Boolean\(user && requiresEmailVerification\(user\)\)\)/);
+  assert.match(rootLayout, /setProfileReady\(progress\.state === "COMPLETED"\)/);
+  assert.match(rootLayout, /loadFirstRunPreferences\(Boolean\(authUserUid\)\)/);
+  assert.match(rootLayout, /setRestoredAccountUid\(accountUid\)/);
+  assert.match(rootLayout, /startupReady && authPhase !== "authenticated"/);
+  assert.match(rootLayout, /authPhase === "loading" && !authUserUid/);
+  assert.match(authStore, /set\(\{ phase: ready \? "authenticated" : "profile_setup_required" \}\)/);
+  assert.equal(resolveIdentityStartupPhase(true, false), "loading");
+  assert.equal(resolveLocalProfileSetupState("NOT_STARTED", false), "NOT_STARTED");
 });
 
 test("online returning account restores its previously selected local profile", () => {

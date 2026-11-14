@@ -122,10 +122,10 @@ export default function RootLayout() {
   }, [isDatabaseReady, loadSettings]);
 
   useEffect(() => {
-    if (!isDatabaseReady || authPhase === "loading" || firstRunLoadStarted.current) return;
+    if (!isDatabaseReady || (authPhase === "loading" && !authUserUid) || firstRunLoadStarted.current) return;
     firstRunLoadStarted.current = true;
     let current = true;
-    void loadFirstRunPreferences(authPhase !== "unauthenticated").then((preferences) => {
+    void loadFirstRunPreferences(Boolean(authUserUid)).then((preferences) => {
       if (current) setFirstRunPreferences(preferences);
     }).catch(() => {
       // A preference read must never block sign-in or strand an existing user.
@@ -133,7 +133,7 @@ export default function RootLayout() {
       if (current) setFirstRunPreferences({ onboardingComplete: true, notificationPrimerHandled: true });
     });
     return () => { current = false; };
-  }, [authPhase, isDatabaseReady]);
+  }, [authPhase, authUserUid, isDatabaseReady]);
 
   useEffect(() => {
     if (!isDatabaseReady || !authUserUid || isVerificationRequired) return;

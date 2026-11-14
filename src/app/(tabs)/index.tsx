@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { SymbolView } from "expo-symbols";
 
 import {
   toLocalDateString,
@@ -33,6 +34,7 @@ import { TabContentTransition } from "@/components/tab-content-transition";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useUserPullRefresh } from "@/hooks/use-user-pull-refresh";
 import { useDoseStore } from "@/state/dose.store";
+import { getNextDoseEmptyMessage } from "@/features/doses/home-empty-state.domain";
 
 const UPCOMING_STATUS_LABEL = "Upcoming";
 type FinalizedDoseFilter = "taken" | "skipped";
@@ -85,7 +87,7 @@ export default function HomeScreen() {
     correctStatus,
     clearError,
   } = useDoses();
-  const hasCurrentDoseData = doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
+  const hasCurrentDoseData = Boolean(selectedProfileId) && doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
   const delayedLoadingVisible = useDelayedLoading(isLoading && !hasCurrentDoseData);
   const showFirstScopeSkeleton = !error && !hasCurrentDoseData && delayedLoadingVisible;
   const hasCurrentDoseContent = hasCurrentDoseData;
@@ -102,6 +104,13 @@ export default function HomeScreen() {
   const missedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "missed"), [visibleDoses]);
   const recordedCount = takenDoses.length + skippedDoses.length;
   const nextDose = pendingDoses[0] ?? null;
+  const nextDoseEmptyMessage = getNextDoseEmptyMessage({
+    doseDataReady: hasCurrentDoseData,
+    hasError: Boolean(error),
+    hasUpcomingDose: Boolean(nextDose),
+    selectedDate: selectedScheduleDate,
+    todayDate,
+  });
   const finalizedDoses = useMemo(
     () => visibleDoses.filter((dose) => dose.status === finalizedDoseFilter),
     [finalizedDoseFilter, visibleDoses],
@@ -306,13 +315,16 @@ export default function HomeScreen() {
               </View>
             </View> : showFirstScopeSkeleton ? <HomeSummarySkeleton /> : <View style={styles.progressPlaceholder} />}</ContentFade>
             <Text style={styles.sectionTitle}>Next medication</Text>
-            {nextDose ? renderDose({ item: nextDose, featured: true }) : hasCurrentDoseContent && visibleDoses.length > 0 ? <View style={styles.caughtUp}>
-              <Text style={styles.caughtUpText}>No more medications scheduled for today.</Text>
+            {nextDose ? renderDose({ item: nextDose, featured: true }) : nextDoseEmptyMessage ? <View style={styles.caughtUp}>
+              <Text style={styles.caughtUpText}>{nextDoseEmptyMessage}</Text>
             </View> : null}
             <View style={styles.scheduleHeading}>
               <Text style={styles.sectionTitle}>Today&apos;s schedule</Text>
               <Pressable accessibilityRole="button" accessibilityLabel="Add medication" onPress={() => router.push("/medications")} style={({ pressed }) => [styles.addMedicationTouchTarget, pressed && styles.addMedicationPressed]}>
-                <View pointerEvents="none" style={styles.addMedicationCapsule}><Text style={styles.addMedicationLabel}>Add medication</Text></View>
+                <View pointerEvents="none" style={styles.addMedicationCapsule}>
+                  <SymbolView accessibilityElementsHidden name={{ ios: "plus", android: "add", web: "add" }} size={14} tintColor={colors.outlineForeground} />
+                  <Text style={styles.addMedicationLabel}>Add medication</Text>
+                </View>
               </Pressable>
             </View>
 
@@ -359,7 +371,7 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   summaryText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
   scheduleHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md, marginBottom: ui.spacing.xs },
   addMedicationTouchTarget: { minHeight: 48, justifyContent: "center", paddingHorizontal: 2 },
-  addMedicationCapsule: { minHeight: 32, justifyContent: "center", alignItems: "center", paddingHorizontal: 11, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 999, backgroundColor: colors.surface },
+  addMedicationCapsule: { minHeight: 32, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 4, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 999, backgroundColor: colors.surface },
   addMedicationLabel: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.outlineForeground },
   addMedicationPressed: { opacity: 0.72 },
   caughtUp: { paddingVertical: ui.spacing.sm },

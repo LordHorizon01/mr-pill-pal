@@ -19,6 +19,7 @@ import { useNotificationCenterStore } from "@/state/notification-center.store";
 import { useProfileStore } from "@/state/profile.store";
 import { useSettingsStore } from "@/state/settings.store";
 import { formatNotificationPresentation, formatNotificationTimestamp, getUnreadBadgeLabel } from "./notification-center.domain";
+import { getNotificationPanelLayout } from "./notification-center-layout.domain";
 import { NotificationEvent } from "./notification-center.types";
 
 type OverlayProps = {
@@ -90,8 +91,7 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
   const visibleBanner = activeAccountUid === accountUid && userUid === accountUid && currentBanner?.accountUid === accountUid
     ? currentBanner
     : null;
-  const panelMaxHeight = Math.max(180, height - insets.top - insets.bottom - 36);
-  const listMaxHeight = Math.max(72, panelMaxHeight - 122);
+  const panelLayout = getNotificationPanelLayout(width, height, insets.top, insets.bottom);
   const bannerPresentation = visibleBanner
     ? formatNotificationPresentation(visibleBanner, selectedProfileId, hideMedicationName)
     : null;
@@ -137,12 +137,14 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
   const emptyCopy = selectedList === "read" ? "No read notifications" : "No notifications yet";
   const hasNoItemsInSection = readListCount === 0;
   const shouldShowEmptyMessage = !isLoading && !isLoadingMore && !error && (hasNoItemsInSection || !hasMore);
+  const showCenteredEmptyList = visibleEvents.length === 0 && shouldShowEmptyMessage;
+  const panelMinHeight = showCenteredEmptyList ? panelLayout.emptyMinHeight : undefined;
 
   return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
     {visibleBanner && bannerPresentation ? <View pointerEvents="box-none" style={[styles.bannerLayer, { top: insets.top + 8 + bannerTopInset }]}>
       <View accessibilityLiveRegion="polite" style={styles.banner}>
         <View style={styles.bannerIcon}>
-          <SymbolView accessibilityElementsHidden name={{ ios: "bell.fill", android: "notifications", web: "notifications" }} size={19} tintColor={colors.primary} />
+          <SymbolView accessibilityElementsHidden name={{ ios: "pills.fill", android: "medication", web: "medication" }} size={19} tintColor={colors.primary} />
         </View>
         <View style={styles.bannerCopy}>
           <Text style={styles.bannerTitle}>{bannerPresentation.primaryMessage}</Text>
@@ -165,39 +167,35 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
       <View style={styles.modalRoot}>
         <Pressable accessibilityRole="button" accessibilityLabel="Close notifications" onPress={closePanel} style={[StyleSheet.absoluteFill, styles.scrim]} />
         <View pointerEvents="box-none" style={[styles.panelPlacement, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 12 }]}>
-          <View style={[styles.panel, { maxHeight: panelMaxHeight, width: Math.min(Math.max(width - 40, 0), 360) }]}>
+          <View style={[styles.panel, { maxHeight: panelLayout.maxHeight, minHeight: panelMinHeight, width: panelLayout.width }]}>
             <View style={styles.panelHeader}>
               <View style={styles.panelHeaderCopy}>
                 <Text accessibilityRole="header" style={styles.panelTitle}>Notifications</Text>
                 <Text style={styles.panelCount}>{visibleUnreadCount} unread · {totalCount} total</Text>
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Close notifications" onPress={closePanel} style={styles.closeButton}>
-                <SymbolView accessibilityElementsHidden name={{ ios: "xmark", android: "close", web: "close" }} size={20} tintColor={colors.textSecondary} />
-              </Pressable>
-            </View>
-
-            <View style={styles.panelActions}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={selectedList === "read" ? "Return to unread notifications" : `Show ${readCount} already read notifications`}
                 accessibilityState={{ selected: selectedList === "read" }}
-                onPress={() => setSelectedList(selectedList === "read" ? "unread" : "read")}
-                style={({ pressed }) => [styles.readSectionButton, selectedList === "read" && styles.readSectionButtonSelected, pressed && styles.actionPressed]}
+                onPress={() => setSelectedList((current) => current === "read" ? "unread" : "read")}
+                style={({ pressed }) => [styles.readSectionTouchTarget, pressed && styles.actionPressed]}
               >
-                <Text style={[styles.readSectionButtonText, selectedList === "read" && styles.readSectionButtonTextSelected]}>
-                  {selectedList === "read" ? "← Notifications" : "Already Read"}
-                </Text>
+                <View style={[styles.readSectionCapsule, selectedList === "read" && styles.readSectionCapsuleSelected]}>
+                  {selectedList === "read" ? <>
+                    <SymbolView accessibilityElementsHidden name={{ ios: "arrow.left", android: "arrow_back", web: "arrow_back" }} size={13} tintColor={colors.primary} />
+                    <Text style={[styles.readSectionButtonText, styles.readSectionButtonTextSelected]}>Notifications</Text>
+                  </> : <>
+                    <View accessible={false} style={styles.doubleCheckIcon}>
+                      <SymbolView accessibilityElementsHidden name={{ ios: "checkmark", android: "check", web: "check" }} size={12} tintColor={colors.primary} />
+                      <SymbolView accessibilityElementsHidden style={styles.overlappedCheckIcon} name={{ ios: "checkmark", android: "check", web: "check" }} size={12} tintColor={colors.primary} />
+                    </View>
+                    <Text style={styles.readSectionButtonText}>Already Read</Text>
+                  </>}
+                </View>
               </Pressable>
-              {visibleUnreadCount > 0 ? <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Mark all ${visibleUnreadCount} notifications as read`}
-                accessibilityState={{ disabled: isMarkingAll, busy: isMarkingAll }}
-                disabled={isMarkingAll}
-                onPress={() => void markAllRead()}
-                style={({ pressed }) => [styles.markAllButton, pressed && !isMarkingAll && styles.actionPressed]}
-              >
-                <Text style={[styles.markAllText, isMarkingAll && styles.actionDisabledText]}>{isMarkingAll ? "Saving…" : "Mark all as read"}</Text>
-              </Pressable> : <View style={styles.actionSpacer} />}
+              <Pressable accessibilityRole="button" accessibilityLabel="Close notifications" onPress={closePanel} style={styles.closeButton}>
+                <SymbolView accessibilityElementsHidden name={{ ios: "xmark", android: "close", web: "close" }} size={20} tintColor={colors.textSecondary} />
+              </Pressable>
             </View>
 
             {error ? <View style={styles.errorBox}>
@@ -217,8 +215,20 @@ export function NotificationCenterOverlay({ accountUid, bannerTopInset, onReload
                 now={clockNow ?? 0}
                 onMarkRead={onMarkRead}
               />}
-              style={[styles.notificationList, { maxHeight: listMaxHeight }]}
-              contentContainerStyle={visibleEvents.length ? styles.listContent : styles.emptyListContent}
+              ListHeaderComponent={selectedList === "unread" && visibleUnreadCount > 0 ? <View style={styles.listHeaderActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Mark all ${visibleUnreadCount} notifications as read`}
+                  accessibilityState={{ disabled: isMarkingAll, busy: isMarkingAll }}
+                  disabled={isMarkingAll}
+                  onPress={() => void markAllRead()}
+                  style={({ pressed }) => [styles.markAllButton, pressed && !isMarkingAll && styles.actionPressed]}
+                >
+                  <Text style={[styles.markAllText, isMarkingAll && styles.actionDisabledText]}>{isMarkingAll ? "Saving…" : "Mark all as read"}</Text>
+                </Pressable>
+              </View> : null}
+              style={showCenteredEmptyList ? styles.emptyNotificationList : [styles.notificationList, { maxHeight: panelLayout.listMaxHeight }]}
+              contentContainerStyle={showCenteredEmptyList ? styles.emptyListContent : styles.listContent}
               contentInsetAdjustmentBehavior="automatic"
               onEndReached={() => { if (hasMore && !isLoadingMore) onLoadMore(); }}
               onEndReachedThreshold={0.35}
@@ -297,26 +307,29 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   bellBadgeText: { color: colors.onPrimary, fontSize: 9, lineHeight: 12, fontWeight: "800", fontVariant: ["tabular-nums"] },
   modalRoot: { flex: 1 },
   scrim: { backgroundColor: `${colors.scrim}66` },
-  panelPlacement: { flex: 1, paddingHorizontal: 20, alignItems: "flex-end", justifyContent: "flex-start" },
+  panelPlacement: { flex: 1, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
   panel: { flexShrink: 1, borderRadius: 18, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, boxShadow: "0 10px 30px rgba(0, 0, 0, 0.22)" },
-  panelHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 14, paddingRight: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
-  panelHeaderCopy: { flex: 1 },
+  panelHeader: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 13, paddingRight: 6 },
+  panelHeaderCopy: { flex: 1, minWidth: 0 },
   panelTitle: { fontSize: 19, lineHeight: 25, fontWeight: "700", color: colors.textPrimary },
   panelCount: { marginTop: 1, fontSize: 12.5, lineHeight: 17, color: colors.textSecondary },
   closeButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12 },
-  panelActions: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
-  readSectionButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 11, borderRadius: ui.radius.chip, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSubtle },
-  readSectionButtonSelected: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  readSectionTouchTarget: { minWidth: 44, minHeight: 48, alignItems: "center", justifyContent: "center" },
+  readSectionCapsule: { minHeight: 32, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 8, borderRadius: ui.radius.chip, borderWidth: 1, borderColor: colors.outlineBorder, backgroundColor: colors.surface },
+  readSectionCapsuleSelected: { backgroundColor: colors.surfaceSubtle },
   readSectionButtonText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17, fontWeight: "700" },
   readSectionButtonTextSelected: { color: colors.primary },
-  markAllButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 7 },
+  doubleCheckIcon: { flexDirection: "row", alignItems: "center" },
+  overlappedCheckIcon: { marginLeft: -6 },
+  listHeaderActions: { alignItems: "flex-end", paddingHorizontal: 9, paddingTop: 2 },
+  markAllButton: { minHeight: 38, justifyContent: "center", paddingHorizontal: 7 },
   markAllText: { color: colors.primary, fontSize: 12.5, lineHeight: 17, fontWeight: "700" },
-  actionSpacer: { minWidth: 8, minHeight: 44 },
   actionPressed: { opacity: 0.68 },
   actionDisabledText: { color: colors.textMuted },
   notificationList: { flexGrow: 0, flexShrink: 1 },
+  emptyNotificationList: { flex: 1 },
   listContent: { paddingHorizontal: 9, paddingVertical: 9, gap: 7 },
-  emptyListContent: { padding: 8 },
+  emptyListContent: { flexGrow: 1, alignItems: "stretch", justifyContent: "center", paddingHorizontal: 10, paddingVertical: 8 },
   notificationRow: { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   notificationRowUnread: { backgroundColor: colors.surfaceSubtle, borderColor: colors.borderStrong },
   primaryMessageRow: { flexDirection: "row", alignItems: "flex-start", gap: 7 },
@@ -330,7 +343,7 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   markReadButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 24, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.surface },
   markReadButtonPressed: { backgroundColor: colors.primarySoft },
   markReadButtonDisabled: { opacity: 0.6 },
-  emptyState: { alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 12 },
+  emptyState: { alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, paddingVertical: 12 },
   emptyTitle: { color: colors.textPrimary, fontSize: 14, lineHeight: 19, fontWeight: "700", textAlign: "center" },
   loader: { paddingVertical: 18 },
   footerLoader: { paddingVertical: 14 },
