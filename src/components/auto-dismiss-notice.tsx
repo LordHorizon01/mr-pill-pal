@@ -14,7 +14,10 @@ export function AutoDismissNotice({
   const { colors } = useAppTheme();
   const styles = createStyles(colors);
   const onDismissRef = useRef(onDismiss);
-  onDismissRef.current = onDismiss;
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
 
   useEffect(() => {
     if (!message) {

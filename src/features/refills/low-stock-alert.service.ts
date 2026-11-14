@@ -1,15 +1,17 @@
-import { cancelScheduledNotification, hasNotificationPermission, scheduleLowStockNotification } from "@/notifications/notification.service";
+import { cancelScheduledNotification, cancelScheduledNotifications, getScheduledNotificationIds, hasNotificationPermission, scheduleLowStockNotification } from "@/notifications/notification.service";
 import { getHideMedicationName } from "@/features/settings/settings.repository";
 
 import { getLowStockNotificationContent } from "./low-stock-alert.domain";
 import {
   clearRefillAlertNotificationId,
   getLowStockMedicationIdsForAccount,
+  getLowStockAlertNotificationsForAccount,
   getRefillAlertNotificationId,
   markLowStockAlertDelivered,
   markLowStockAlertPermissionRequired,
   markLowStockAlertSchedulingFailed,
   reconcileStoredLowStockEpisode,
+  finalizeLowStockAlertsForAccountSignOut,
 } from "./low-stock-alert.repository";
 import { LowStockAlertCandidate } from "./refill.types";
 
@@ -96,6 +98,15 @@ export function reconcileLowStockAlertsForAccount(accountUid: string): Promise<v
   });
   accountOperations.set(accountUid, operation);
   return operation;
+}
+
+/** Cancels private inventory alerts before sign-out, while preserving their episode for the next sign-in. */
+export async function cancelLowStockAlertsForAccount(accountUid: string): Promise<void> {
+  const alerts = await getLowStockAlertNotificationsForAccount(accountUid);
+  const notificationIds = [...new Set(alerts.map((alert) => alert.notificationId))];
+  const scheduledIds = new Set(await getScheduledNotificationIds());
+  if (notificationIds.length > 0) await cancelScheduledNotifications(notificationIds);
+  await finalizeLowStockAlertsForAccountSignOut(accountUid, scheduledIds);
 }
 
 /** Used before destructive medication removal so a saved native refill notification cannot be orphaned. */

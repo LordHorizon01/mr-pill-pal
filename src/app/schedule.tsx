@@ -6,6 +6,7 @@ import DateTimePicker, {
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +16,8 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
-import { scheduleTestNotification } from "@/notifications/notification.service";
+import { getPrimerNotificationPermission, requestPrimerNotificationPermission, scheduleTestNotification } from "@/notifications/notification.service";
+import { getNotificationPermissionRecoveryAction } from "@/notifications/notification-permission.domain";
 import { useSchedules } from "@/hooks/useSchedules";
 import { useSettingsStore } from "@/state/settings.store";
 import { AutoDismissNotice } from "@/components/auto-dismiss-notice";
@@ -57,7 +59,7 @@ function getScheduleStatusInfo(
     case "permission_required":
       return {
         label: "Notifications disabled",
-        description: "Enable notifications to start this reminder.",
+        description: "Enable notifications to start this reminder. If permission was denied, allow it in app settings.",
         action: "Enable notifications",
       };
     case "scheduling_failed":
@@ -501,6 +503,25 @@ export default function ScheduleScreen() {
       if (schedule.reminderStatus === "active") {
         await pauseSchedule(schedule.id);
       } else if (schedule.reminderStatus !== "expired") {
+        if (schedule.reminderStatus === "permission_required") {
+          const currentPermission = await getPrimerNotificationPermission();
+          const action = getNotificationPermissionRecoveryAction({
+            granted: currentPermission.status === "granted",
+            canAskAgain: currentPermission.canAskAgain,
+          });
+
+          if (action === "request") {
+            const requestedPermission = await requestPrimerNotificationPermission();
+            if (requestedPermission.status !== "granted") {
+              setFormMessage("Notifications are disabled. Allow them in Android app settings, then tap Enable notifications again.");
+              return;
+            }
+          } else if (action === "settings") {
+            await Linking.openSettings();
+            setFormMessage("Allow notifications in Android app settings, return here, and tap Enable notifications again.");
+            return;
+          }
+        }
         await resumeSchedule(schedule.id);
       }
     } catch {

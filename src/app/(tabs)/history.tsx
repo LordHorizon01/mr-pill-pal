@@ -22,28 +22,56 @@ import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 
 const statuses: HistoryStatusFilter[] = ["all", "taken", "skipped", "missed"];
 const ranges = ["all", "today", "week"] as const;
+type HistoryRange = (typeof ranges)[number];
 const historySeparatorStyles = StyleSheet.create({ record: { height: 8 }, dateGroup: { height: 14 } });
 function displayTime(value: string) { const [hours, minutes] = value.split(":").map(Number); return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
 
 export default function HistoryScreen() {
-  const { colors } = useAppTheme(); const styles = createStyles(colors);
   const selectedProfileId = useProfileStore((state) => state.selectedProfileId);
+  const [status, setStatus] = useState<HistoryStatusFilter>("all");
+  const [range, setRange] = useState<HistoryRange>("all");
+
+  return (
+    <HistoryProfileScreen
+      key={selectedProfileId ?? "no-profile"}
+      selectedProfileId={selectedProfileId}
+      status={status}
+      range={range}
+      setStatus={setStatus}
+      setRange={setRange}
+    />
+  );
+}
+
+function HistoryProfileScreen({
+  selectedProfileId,
+  status,
+  range,
+  setStatus,
+  setRange,
+}: {
+  selectedProfileId: string | null;
+  status: HistoryStatusFilter;
+  range: HistoryRange;
+  setStatus: (value: HistoryStatusFilter) => void;
+  setRange: (value: HistoryRange) => void;
+}) {
+  const { colors } = useAppTheme(); const styles = createStyles(colors);
   const { doses, loadedQueryKey, isLoading, deletingDoseId, error, loadHistory, deleteHistoryRecord, clearError } = useHistory();
   const historyProfileId = useHistoryStore((state) => state.profileId);
   const { medications, loadMedications } = useMedications();
   const listRef = useRef<SectionList<HistoryDose, AccordionSection<HistoryDose>>>(null);
-  const [status, setStatus] = useState<HistoryStatusFilter>("all"); const [range, setRange] = useState<(typeof ranges)[number]>("all"); const [medicationId, setMedicationId] = useState<string>(); const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [medicationId, setMedicationId] = useState<string>(); const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const query = useMemo(() => ({ status, medicationId, ...(range === "today" ? { fromDate: toLocalDateString(), toDate: toLocalDateString() } : range === "week" ? { fromDate: addDaysToLocalDate(toLocalDateString(), -6), toDate: toLocalDateString() } : {}) }), [status, medicationId, range]);
   const hasCurrentHistoryData = historyProfileId === selectedProfileId && isHistoryQueryCurrent(loadedQueryKey, query);
   const delayedLoadingVisible = useDelayedLoading(isLoading && !hasCurrentHistoryData);
   const showFirstScopeSkeleton = !error && !hasCurrentHistoryData && delayedLoadingVisible;
   const hasCurrentHistoryContent = hasCurrentHistoryData;
-  const visibleDoses = hasCurrentHistoryContent ? doses : [];
+  const visibleDoses = useMemo(() => hasCurrentHistoryContent ? doses : [], [doses, hasCurrentHistoryContent]);
   const refresh = useCallback(() => void loadHistory(query), [loadHistory, query]);
   const { refreshing: userPullRefreshing, onRefresh: refreshFromPull } = useUserPullRefresh(() => loadHistory(query));
-  useFocusEffect(useCallback(() => { const plan = getHistoryReentryResetPlan(); if (plan.resetAccordion) setExpandedDate(resetExpandedHistoryDate()); if (plan.scrollToTop) listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: false }); refresh(); return () => { setExpandedDate(resetExpandedHistoryDate()); }; }, [refresh, selectedProfileId]));
+  useFocusEffect(useCallback(() => { const plan = getHistoryReentryResetPlan(); if (plan.resetAccordion) setExpandedDate(resetExpandedHistoryDate()); if (plan.scrollToTop) listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: false }); refresh(); return () => { setExpandedDate(resetExpandedHistoryDate()); }; }, [refresh]));
   useEffect(() => { void loadMedications("all"); }, [loadMedications, selectedProfileId]);
-  useEffect(() => { setMedicationId(undefined); setExpandedDate(null); }, [selectedProfileId]);
   const groups = useMemo(() => groupHistoryByLocalDate(visibleDoses), [visibleDoses]); const sections = useMemo(() => createHistoryAccordionSections(groups, expandedDate), [expandedDate, groups]);
   const resetAccordion = () => { setExpandedDate(resetExpandedHistoryDate()); };
   const changeStatus = (value: HistoryStatusFilter) => { resetAccordion(); setStatus(value); };

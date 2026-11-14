@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Animated, Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SymbolView } from "expo-symbols";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -6,6 +6,7 @@ import { useAppDrawer } from "@/components/app-drawer";
 import { useAppTheme, useAppThemeColorStyle } from "@/components/app-theme-provider";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { useOfflineStatusStore } from "@/state/offline-status.store";
 
 const primaryLogo = require("../../assets/brand/runtime/ui/Primary Horizontal Logo/mpp-logo-horizontal-home-header.png");
 const homeBrandInset = 21;
@@ -25,11 +26,14 @@ type ScreenHeaderProps = {
   greeting?: string;
   date?: string;
   rightAction?: { accessibilityLabel: string; onPress: () => void };
+  rightAccessory?: ReactNode;
 };
 
-export function ScreenHeader({ title, variant = "page", greeting, date, rightAction }: ScreenHeaderProps) {
+export function ScreenHeader({ title, variant = "page", greeting, date, rightAction, rightAccessory }: ScreenHeaderProps) {
   const { openDrawer } = useAppDrawer();
   const { colors } = useAppTheme();
+  const isOffline = useOfflineStatusStore((state) => state.isOffline);
+  const dismissOfflineStatus = useOfflineStatusStore((state) => state.dismiss);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
@@ -38,10 +42,11 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
   const [homeCopyHeight, setHomeCopyHeight] = useState(42);
   const [pageTitleHeight, setPageTitleHeight] = useState(28);
   const isHome = variant === "home";
-  const logoWidth = Math.min(logoWidthTarget, Math.max(0, width - homeBrandInset * 2));
+  const logoWidth = Math.min(logoWidthTarget, Math.max(0, width - homeBrandInset * 2 - (rightAccessory ? 56 : 0)));
   const logoHeight = logoWidth / logoVisibleAspectRatio;
   const heading = greeting ?? title;
-  const pageHeaderRowWidth = rightAction ? width - pageHeaderInset - 2 : width - pageHeaderInset * 2;
+  const hasRightSlot = Boolean(rightAction || rightAccessory);
+  const pageHeaderRowWidth = hasRightSlot ? width - pageHeaderInset - 2 : width - pageHeaderInset * 2;
   const wordmarkStartX = homeBrandInset + logoOpticalOffsetX + logoWidth * logoWordmarkStartRatio;
   const symbolCenterX = homeBrandInset + logoOpticalOffsetX + logoWidth * logoSymbolCenterRatio;
   const wordmarkDividerY = logoHeight * logoWordmarkBottomRatio + 2.5;
@@ -80,13 +85,14 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
             </View>
           </Animated.View>
         </Pressable>
+        {rightAccessory ? <View pointerEvents="box-none" style={[styles.homeRightAccessory, { right: homeBrandInset, top: 0 }]}>{rightAccessory}</View> : null}
         <View
           onLayout={(event) => {
             const height = event.nativeEvent?.layout?.height;
             if (typeof height !== "number" || !Number.isFinite(height)) return;
             setHomeCopyHeight((previous) => Math.abs(previous - height) < 0.5 ? previous : height);
           }}
-          style={[styles.homeCopy, { left: wordmarkStartX, right: 16, top: homeCopyTop }]}
+          style={[styles.homeCopy, { left: wordmarkStartX, right: rightAccessory ? 72 : 16, top: homeCopyTop }]}
         >
           <Text accessibilityRole="header" style={styles.homeTitle}>
             {emphasizeGreetingName && greetingMatch ? <><Text style={styles.homeGreetingPrefix}>{greetingMatch[1]}</Text><Text style={styles.homeGreetingName}>{greetingName}</Text></> : heading}
@@ -113,7 +119,7 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
             </View>
           </Animated.View>
         </Pressable>
-        <View style={[styles.pageCopy, { left: symbolCenterX - pageHeaderInset + 27, right: rightAction ? 54 : 0, top: 3 }]}>
+        <View style={[styles.pageCopy, { left: symbolCenterX - pageHeaderInset + 27, right: hasRightSlot ? 54 : 0, top: 3 }]}>
           <Text accessibilityRole="header" onLayout={(event) => {
             const height = event.nativeEvent?.layout?.height;
             if (typeof height !== "number" || !Number.isFinite(height)) return;
@@ -130,8 +136,15 @@ export function ScreenHeader({ title, variant = "page", greeting, date, rightAct
             <SymbolView accessibilityElementsHidden name={{ ios: "gearshape.fill", android: "settings", web: "settings" }} size={23} tintColor={colors.primary} />
           </View>
         </Pressable> : null}
+        {rightAccessory ? <View pointerEvents="box-none" style={styles.rightAction}>{rightAccessory}</View> : null}
       </View>
     </View> : null}
+    {isOffline ? <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Dismiss offline status. Saved medicines are available on this device."
+      onPress={dismissOfflineStatus}
+      style={styles.offlineNotice}
+    ><Text style={styles.offlineNoticeText}>You’re offline. Saved medicines are available.</Text></Pressable> : null}
   </Animated.View>;
 }
 
@@ -146,11 +159,14 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   hamburger: { width: 16, gap: 3 },
   hamburgerLine: { height: 2, width: "100%", borderRadius: 1, backgroundColor: colors.textPrimary },
   homeCopy: { position: "absolute" },
+  homeRightAccessory: { position: "absolute", width: 48, height: 48, alignItems: "center", justifyContent: "center" },
   pageCopy: { position: "absolute" },
   homeTitle: { fontSize: 16, lineHeight: 20, fontWeight: "400", color: colors.textPrimary },
   homeGreetingPrefix: { fontSize: 16, lineHeight: 20, fontWeight: "400", color: colors.textPrimary },
   homeGreetingName: { fontSize: 16, lineHeight: 20, fontWeight: "600", color: colors.textPrimary },
   pageTitle: { fontSize: 20, lineHeight: 26, fontWeight: "600", color: colors.textPrimary },
+  offlineNotice: { minHeight: 32, justifyContent: "center", marginHorizontal: pageHeaderInset, marginTop: 4, marginBottom: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.border, borderRadius: ui.radius.medium, backgroundColor: colors.surfaceSubtle },
+  offlineNoticeText: { ...ui.typography.caption, color: colors.textSecondary },
   rightAction: { position: "absolute", top: 0, right: 0, width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   rightActionCircle: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 19, backgroundColor: colors.surfaceSubtle, transform: [{ translateY: -7 }] },
   rightActionPressed: { opacity: 0.68 },

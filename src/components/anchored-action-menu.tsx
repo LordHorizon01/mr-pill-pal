@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { LayoutChangeEvent, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { useAppTheme } from "@/components/app-theme-provider";
@@ -31,14 +31,10 @@ export function AnchoredActionMenu({ visible, anchor, items, accessibilityLabel,
   const menuMinimumWidth = Math.min(192, menuMaximumWidth);
   const [menuSize, setMenuSize] = useState<{ width: number; height: number } | null>(null);
 
-  useEffect(() => {
-    if (!visible) setMenuSize(null);
-  }, [visible]);
-
   const placement = useMemo(() => {
-    if (!anchor || !menuSize) return null;
+    if (!visible || !anchor || !menuSize) return null;
     return getAnchoredMenuPlacement(anchor, menuSize, window, SCREEN_INSETS);
-  }, [anchor, menuSize, window]);
+  }, [anchor, menuSize, visible, window]);
 
   function handleLayout(event: LayoutChangeEvent) {
     const { width, height } = event.nativeEvent.layout;

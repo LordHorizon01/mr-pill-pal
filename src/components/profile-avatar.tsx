@@ -31,11 +31,12 @@ export function getProfileAvatarSource(profile: Pick<Profile, "avatarUrl"> | nul
 export function ProfileAvatar({ profile, size = 42 }: { profile: Pick<Profile, "avatarUrl"> | null; size?: number }) {
   const { colors } = useAppTheme();
   const avatarUrl = profile?.avatarUrl?.trim() ?? null;
+  const isDevicePhoto = Boolean(avatarUrl && !avatarUrl.startsWith("preset:") && !avatarUrl.startsWith("default:"));
   const [failedAvatarKey, setFailedAvatarKey] = useState<string | null>(null);
   const source = failedAvatarKey === avatarUrl ? neutralAvatar : getProfileAvatarSource(profile);
   return (
     <View accessible={false} style={[styles.frame, { width: size, height: size, borderRadius: size / 2, backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
-      <Image accessibilityElementsHidden source={source} resizeMode={source === neutralAvatar ? "contain" : "cover"} style={{ width: Math.max(0, size - 2), height: Math.max(0, size - 2) }} onError={() => { if (source !== neutralAvatar) setFailedAvatarKey(avatarUrl); }} />
+      <Image accessibilityElementsHidden source={source} resizeMode={source === neutralAvatar ? "contain" : "cover"} style={[{ width: Math.max(0, size - 2), height: Math.max(0, size - 2) }, isDevicePhoto && { borderRadius: Math.max(0, (size - 2) / 2) }]} onError={() => { if (source !== neutralAvatar) setFailedAvatarKey(avatarUrl); }} />
     </View>
   );
 }

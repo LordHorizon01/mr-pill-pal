@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { SymbolView } from "expo-symbols";
 
 import {
   toLocalDateString,
@@ -18,12 +19,13 @@ import { TodayDose } from "@/features/doses/dose.types";
 import { useDoses } from "@/hooks/useDoses";
 import { AppColorTokens, ui } from "@/components/ui-tokens";
 import { ScreenHeader } from "@/components/screen-header";
+import { NotificationBellButton } from "@/notifications/notification-center-ui";
 import { HomeDateCarousel } from "@/components/home-date-carousel";
 import { motion } from "@/components/motion-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useProfileStore } from "@/state/profile.store";
 import { getHomeGreeting } from "@/features/profiles/profile.domain";
-import { StatusBadge, ThemedButton, ThemedChip } from "@/components/themed-ui";
+import { StatusBadge, ThemedChip } from "@/components/themed-ui";
 import { DoseStatusOverflowSheet } from "@/features/doses/dose-status-overflow-sheet";
 import { shouldShowDoseCorrectionOverflow } from "@/features/doses/dose-card-presentation.domain";
 import { AnchoredMenuAnchor } from "@/components/anchored-action-menu.domain";
@@ -32,6 +34,7 @@ import { TabContentTransition } from "@/components/tab-content-transition";
 import { useDelayedLoading } from "@/hooks/use-delayed-loading";
 import { useUserPullRefresh } from "@/hooks/use-user-pull-refresh";
 import { useDoseStore } from "@/state/dose.store";
+import { getNextDoseEmptyMessage } from "@/features/doses/home-empty-state.domain";
 
 const UPCOMING_STATUS_LABEL = "Upcoming";
 type FinalizedDoseFilter = "taken" | "skipped";
@@ -84,7 +87,7 @@ export default function HomeScreen() {
     correctStatus,
     clearError,
   } = useDoses();
-  const hasCurrentDoseData = doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
+  const hasCurrentDoseData = Boolean(selectedProfileId) && doseProfileId === selectedProfileId && loadedDate === selectedScheduleDate;
   const delayedLoadingVisible = useDelayedLoading(isLoading && !hasCurrentDoseData);
   const showFirstScopeSkeleton = !error && !hasCurrentDoseData && delayedLoadingVisible;
   const hasCurrentDoseContent = hasCurrentDoseData;
@@ -101,6 +104,13 @@ export default function HomeScreen() {
   const missedDoses = useMemo(() => visibleDoses.filter((dose) => dose.status === "missed"), [visibleDoses]);
   const recordedCount = takenDoses.length + skippedDoses.length;
   const nextDose = pendingDoses[0] ?? null;
+  const nextDoseEmptyMessage = getNextDoseEmptyMessage({
+    doseDataReady: hasCurrentDoseData,
+    hasError: Boolean(error),
+    hasUpcomingDose: Boolean(nextDose),
+    selectedDate: selectedScheduleDate,
+    todayDate,
+  });
   const finalizedDoses = useMemo(
     () => visibleDoses.filter((dose) => dose.status === finalizedDoseFilter),
     [finalizedDoseFilter, visibleDoses],
@@ -278,7 +288,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} /><View style={styles.container}>
+    <TabContentTransition style={styles.container}><ScreenHeader variant="home" title="Home" greeting={getHomeGreeting(selectedProfile)} date={formatDate(todayDate)} rightAccessory={<NotificationBellButton />} /><View style={styles.container}>
       <FlatList
         data={finalizedDoses}
         keyExtractor={(item) => item.id}
@@ -305,13 +315,17 @@ export default function HomeScreen() {
               </View>
             </View> : showFirstScopeSkeleton ? <HomeSummarySkeleton /> : <View style={styles.progressPlaceholder} />}</ContentFade>
             <Text style={styles.sectionTitle}>Next medication</Text>
-            {nextDose ? renderDose({ item: nextDose, featured: true }) : hasCurrentDoseContent && visibleDoses.length > 0 ? <View style={styles.caughtUp}>
-              <Text style={styles.emptyTitle}>You&apos;re all caught up</Text>
-              <Text style={styles.emptyText}>No more medications scheduled for today.</Text>
+            {nextDose ? renderDose({ item: nextDose, featured: true }) : nextDoseEmptyMessage ? <View style={styles.caughtUp}>
+              <Text style={styles.caughtUpText}>{nextDoseEmptyMessage}</Text>
             </View> : null}
             <View style={styles.scheduleHeading}>
               <Text style={styles.sectionTitle}>Today&apos;s schedule</Text>
-              <ThemedButton label="Add medication" tone="outline" size="compact" onPress={() => router.push("/medications")} accessibilityLabel="Add medication" style={styles.quickButton} />
+              <Pressable accessibilityRole="button" accessibilityLabel="Add medication" onPress={() => router.push("/medications")} style={({ pressed }) => [styles.addMedicationTouchTarget, pressed && styles.addMedicationPressed]}>
+                <View pointerEvents="none" style={styles.addMedicationCapsule}>
+                  <SymbolView accessibilityElementsHidden name={{ ios: "plus", android: "add", web: "add" }} size={14} tintColor={colors.outlineForeground} />
+                  <Text style={styles.addMedicationLabel}>Add medication</Text>
+                </View>
+              </Pressable>
             </View>
 
             <View style={styles.finalizedFilters}>
@@ -355,9 +369,13 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   progressText: { marginTop: 3, fontSize: 14, color: colors.textSecondary },
   summaryCounts: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 9 },
   summaryText: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
-  quickButton: { flexGrow: 0 },
   scheduleHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: ui.spacing.md, marginBottom: ui.spacing.xs },
-  caughtUp: { paddingVertical: ui.spacing.md },
+  addMedicationTouchTarget: { minHeight: 48, justifyContent: "center", paddingHorizontal: 2 },
+  addMedicationCapsule: { minHeight: 32, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 4, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.outlineBorder, borderRadius: 999, backgroundColor: colors.surface },
+  addMedicationLabel: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.outlineForeground },
+  addMedicationPressed: { opacity: 0.72 },
+  caughtUp: { paddingVertical: ui.spacing.sm },
+  caughtUpText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   errorBox: {
     marginBottom: 16,
@@ -406,13 +424,5 @@ const createStyles = (colors: AppColorTokens) => StyleSheet.create({
   doseActionPressed: { opacity: 0.82 },
   doseActionDisabled: { opacity: 0.5 },
   emptyContainer: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 20 },
-  emptyTitle: { fontSize: 19, fontWeight: "700", color: colors.textPrimary },
-  emptyText: {
-    marginTop: 8,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-    color: colors.textSecondary,
-  },
   emptyButton: { alignSelf: "center", marginTop: 18 },
 });

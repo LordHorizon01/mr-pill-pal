@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,24 +15,47 @@ export default function DoseDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const profileId = useProfileStore((state) => state.selectedProfileId);
-  const [dose, setDose] = useState<HistoryDose | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const requestRevision = useRef(0);
-  const loadDose = useCallback(() => {
-    const currentRequest = ++requestRevision.current;
-    if (!id || !profileId) { setDose(null); return () => undefined; }
+  const [retryRevision, setRetryRevision] = useState(0);
+  const [loadResult, setLoadResult] = useState<{
+    id: string;
+    profileId: string;
+    retryRevision: number;
+    dose: HistoryDose | null;
+    error: string | null;
+  } | null>(null);
+  const currentLoadResult = loadResult?.id === id
+    && loadResult.profileId === profileId
+    && loadResult.retryRevision === retryRevision
+    ? loadResult
+    : null;
+  const dose = currentLoadResult?.dose ?? null;
+  const error = currentLoadResult?.error ?? null;
+
+  useEffect(() => {
+    if (!id || !profileId) return;
     let current = true;
-    setDose(null); setError(null);
     void getHistoryDetail(profileId, id).then((result) => {
-      if (!current || requestRevision.current !== currentRequest) return;
-      if (result) setDose(result);
-      else setError("This dose record is no longer available.");
+      if (!current) return;
+      setLoadResult({
+        id,
+        profileId,
+        retryRevision,
+        dose: result,
+        error: result ? null : "This dose record is no longer available.",
+      });
     }).catch(() => {
-      if (current && requestRevision.current === currentRequest) setError("Dose details couldn't be loaded. Please try again.");
+      if (current) {
+        setLoadResult({
+          id,
+          profileId,
+          retryRevision,
+          dose: null,
+          error: "Dose details couldn't be loaded. Please try again.",
+        });
+      }
     });
     return () => { current = false; };
-  }, [id, profileId]);
-  useEffect(() => loadDose(), [loadDose]);
+  }, [id, profileId, retryRevision]);
 
   return (
     <ScrollView
@@ -44,7 +67,7 @@ export default function DoseDetailScreen() {
         error ? (
           <View style={styles.error}>
             <Text style={styles.errorText}>{error}</Text>
-            <ThemedButton label="Try again" size="compact" tone="outline" accessibilityLabel="Try loading dose details again" onPress={() => void loadDose()} />
+          <ThemedButton label="Try again" size="compact" tone="outline" accessibilityLabel="Try loading dose details again" onPress={() => setRetryRevision((revision) => revision + 1)} />
           </View>
         ) : <ActivityIndicator size="large" style={styles.loader} />
       ) : (

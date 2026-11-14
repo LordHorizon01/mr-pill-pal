@@ -62,6 +62,26 @@ export function normalizeProfileInput(input: CreateProfileInput): CreateProfileI
   };
 }
 
+/** Formats the ISO date stored by the app as the user-facing DD-MM-YYYY value. */
+export function formatDateOfBirthForDisplay(value: string | null | undefined): string {
+  if (!value) return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
+}
+
+/** Converts the displayed DD-MM-YYYY value back to the validated ISO storage value. */
+export function parseDateOfBirthFromDisplay(value: string): string | null {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const dateOfBirth = `${match[3]}-${match[2]}-${match[1]}`;
+  try {
+    normalizeProfileInput({ fullName: "Date validation", relationship: "Self", dateOfBirth });
+    return dateOfBirth;
+  } catch {
+    return null;
+  }
+}
+
 /** Builds a profile edit payload while retaining saved fields that this editor does not expose. */
 export function buildProfileUpdateInput(profile: Profile, input: CreateProfileInput): UpdateProfileInput {
   const normalized = normalizeProfileInput({

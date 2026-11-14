@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mr-pill-pal",
+    "name": "Mr. Pill Pal",
     "slug": "mr-pill-pal",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,11 +11,11 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "icon": "./assets/brand/runtime/android/launcher/App icon master/mpp-app-icon-master-inset-10-1024.png",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FAF3E8",
+        "foregroundImage": "./assets/brand/runtime/android/adaptive/Android adaptive icon - forground + background layer/mpp-adaptive-foreground-inset-10-1024.png",
+        "monochromeImage": "./assets/brand/runtime/android/adaptive/Android monochrome themed icon/mpp-monochrome-icon-inset-10-1024.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.mrpillpal",
@@ -41,7 +41,13 @@
         }
       ],
       "expo-sqlite",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/runtime/android/notification/mpp-notification-icon-white-96x96.png",
+          "color": "#0A5A54"
+        }
+      ],
       "@react-native-community/datetimepicker",
       "@react-native-firebase/app",
       "@react-native-firebase/auth",

@@ -11,6 +11,7 @@ test("stock history labels every supported audit event with user-friendly text",
   assert.equal(getStockHistoryPresentation(event("2", "2026-09-24T10:00:00.000Z", "dose_consumption", -1, "tablets")).label, "Dose taken");
   assert.equal(getStockHistoryPresentation(event("3", "2026-09-24T10:00:00.000Z", "dose_consumption_reversal", 1, "tablets")).label, "Dose correction");
   assert.equal(getStockHistoryPresentation(event("4", "2026-09-24T10:00:00.000Z", "dose_consumption_reapplied", -1, "tablets")).label, "Dose correction");
+  assert.equal(getStockHistoryPresentation(event("5", "2026-09-24T10:00:00.000Z", "manual_adjustment", -2, "tablets")).label, "Stock corrected");
 });
 
 test("stock history preserves unit snapshots and does not guess a legacy event unit", () => {

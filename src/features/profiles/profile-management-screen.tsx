@@ -11,13 +11,13 @@ import { ProfileAvatarPicker } from "@/components/profile-avatar-picker";
 import { AppColorTokens, getButtonColorRoles, ui } from "@/components/ui-tokens";
 import { useAppTheme } from "@/components/app-theme-provider";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
-import { buildProfileUpdateInput, getProfileDisplayName, normalizeProfileInput } from "@/features/profiles/profile.domain";
+import { buildProfileUpdateInput, formatDateOfBirthForDisplay, getProfileDisplayName, normalizeProfileInput } from "@/features/profiles/profile.domain";
 import { Profile, ProfileGender, ProfileRelationship, ProfileSetupDetails, ProfileType, ProfileReminderPreference, ProfileRelationshipKind, CreateProfileInput } from "@/features/profiles/profile.types";
 import { useProfileStore } from "@/state/profile.store";
 import { ThemedButton, ThemedChip } from "@/components/themed-ui";
 import { ProfileCreationWizard } from "@/features/profiles/profile-creation-wizard";
 import { createProfileEditDraft, getLegacyPrimaryProfileSetupDetails, relationshipForDraft } from "@/features/profiles/profile-creation.domain";
-import { createPrimaryProfileId, toggleOptionalProfileChoice } from "@/features/profiles/profile-setup.domain";
+import { createPrimaryProfileId, DOB_MIN_YEAR, toggleOptionalProfileChoice } from "@/features/profiles/profile-setup.domain";
 import { getAccountProfileSetupProgress } from "@/features/auth/auth.service";
 
 const relationships: ProfileRelationship[] = ["Self", "Mother", "Father", "Child", "Spouse", "Family member", "Other"];
@@ -243,7 +243,7 @@ export default function ProfileManagementScreen() {
     }
   }
 
-  const dateValue = dateOfBirth ? localDateFromString(dateOfBirth) : new Date(2000, 0, 1, 12);
+  const dateValue = dateOfBirth ? localDateFromString(dateOfBirth) : new Date();
   const avatarChoice = profileSetupDetails.answerStates?.avatar === "unanswered" || profileSetupDetails.answerStates?.avatar === "skipped"
     ? null
     : avatarUrl ?? null;
@@ -334,6 +334,7 @@ export default function ProfileManagementScreen() {
                   setProfileSetupDetails((current) => ({ ...current, answerStates: { ...current.answerStates, avatar: value ? "answered" : "unanswered" } }));
                 }}
                 onChoosePhoto={() => void choosePhoto()}
+                onEditPhoto={() => void choosePhoto()}
               />
               <Text style={styles.label}>Full name *</Text>
               {profileSetupDetails.systemFallbacks?.fullName === editingProfile?.fullName && !name ? <Text style={styles.helper}>This is an app-generated profile label. Add a name here when you want to replace it.</Text> : null}
@@ -350,11 +351,11 @@ export default function ProfileManagementScreen() {
                 setProfileSetupDetails((current) => ({ ...current, answerStates: { ...current.answerStates, nickname: value.trim() ? "answered" : "unanswered" } }));
               }} placeholder="Nickname" placeholderTextColor={colors.placeholder} autoCapitalize="words" style={styles.input} />
               <Text style={styles.label}>Date of birth (optional)</Text>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Date of birth: ${dateOfBirth || "not answered"}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => setShowDatePicker(true)} style={styles.dateInput}>
-                <Text style={dateOfBirth ? styles.dateValue : styles.datePlaceholder}>{dateOfBirth || "YYYY-MM-DD"}</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Date of birth: ${dateOfBirth ? formatDateOfBirthForDisplay(dateOfBirth) : "not answered"}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => setShowDatePicker(true)} style={styles.dateInput}>
+                <Text style={dateOfBirth ? styles.dateValue : styles.datePlaceholder}>{dateOfBirth ? formatDateOfBirthForDisplay(dateOfBirth) : "DD-MM-YYYY"}</Text>
                 <Text style={styles.dateAction}>Choose date</Text>
               </Pressable>
-              {showDatePicker ? <DateTimePicker value={dateValue} mode="date" maximumDate={new Date()} onValueChange={(_event, value) => {
+              {showDatePicker ? <DateTimePicker value={dateValue} mode="date" minimumDate={new Date(DOB_MIN_YEAR, 0, 1)} maximumDate={new Date()} onValueChange={(_event, value) => {
                 if (value) {
                   setDateOfBirth(toLocalDateString(value));
                   setProfileSetupDetails((current) => ({ ...current, answerStates: { ...current.answerStates, dateOfBirth: "answered" } }));

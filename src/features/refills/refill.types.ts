@@ -7,7 +7,8 @@ export type InventoryEventType =
   | "dose_consumption"
   | "dose_consumption_reversal"
   | "dose_consumption_reapplied"
-  | "refill_addition";
+  | "refill_addition"
+  | "manual_adjustment";
 
 export interface MedicationInventory {
   medicationId: string;
@@ -53,6 +54,18 @@ export interface RecordRefillResult {
   inventory: MedicationInventory;
   event: StockHistoryEvent;
   wasAlreadyRecorded: boolean;
+}
+
+export interface CorrectStockInput {
+  quantity: number;
+  operationId: string;
+}
+
+export interface CorrectStockResult {
+  inventory: MedicationInventory;
+  event?: StockHistoryEvent;
+  wasAlreadyRecorded: boolean;
+  wasChanged: boolean;
 }
 
 export interface RefillAlertState {
